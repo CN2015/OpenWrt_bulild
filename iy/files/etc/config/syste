@@ -1,0 +1,52 @@
+# /etc/config/system - OpenWrt 系统基础配置
+# 包含: 主机名/时区/日志/密码策略/启动项
+
+# 🏷️ 系统标识
+config system
+    option hostname 'OpenWrt'
+    option timezone 'CST-8'
+    option timezone_name 'Asia/Shanghai'
+    option log_size '64'
+    option log_type 'file'
+    option log_file '/var/log/messages'
+    
+    # 🔐 密码策略（首次登录强制修改）
+    option password_timeout '0'  # 0 = 永不过期，但首次登录会提示修改
+    option require_password_change '1'
+
+# 🕐 NTP 时间同步
+config timeserver 'ntp'
+    list server '0.openwrt.pool.ntp.org'
+    list server '1.openwrt.pool.ntp.org'
+    list server '2.openwrt.pool.ntp.org'
+    list server '3.openwrt.pool.ntp.org'
+    option enable_server '0'
+
+# 🔧 LED 指示灯配置（根据机型适配）
+# XDR6088: 蓝色=正常, 红色=故障, 绿色=启动中
+config led 'system'
+    option name 'system'
+    option sysfs 'tp-link:blue:system'
+    option trigger 'default-on'
+    option default '1'
+
+config led 'wan'
+    option name 'wan'
+    option sysfs 'tp-link:blue:wan'
+    option trigger 'netdev'
+    option dev 'eth0'
+    option mode 'link tx rx'
+
+# 📦 自动挂载配置（USB 存储）
+config mount
+    option target '/mnt'
+    option uuid 'auto'
+    option enabled '1'
+    option enabled_fsck '0'
+
+# 🔄 自动升级配置（可选）
+config autoupgrade
+    option enable '0'
+    option check_interval '86400'  # 24 小时检查一次
+    option auto_install '0'
+    option channel 'stable'  # stable / testing / snapshot
