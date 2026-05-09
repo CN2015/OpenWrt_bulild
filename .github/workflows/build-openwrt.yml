@@ -1,7 +1,8 @@
 # ============================================================================
-# OpenWrt LEDE 自动化编译系统 v3.8.16-GA (路径修复版)
+# OpenWrt LEDE 自动化编译系统 v3.8.16-GA (最终稳定版)
 # 功能：系统检测 + 依赖安装 + 源码管理 + 智能配置 + 冲突预检 + 汉化 + 编译重试
 # 适配：TP-LINK XDR6088 / REDMI AX6000 / 自定义机型
+# 核心修复：恢复 LEDE 标准依赖初始化 / 全面使用绝对路径 / 优化变量传递
 # ============================================================================
 
 name: Builder OpenWrt Multi-Device
@@ -25,12 +26,12 @@ on:
         type: choice
         options: [full, mini, custom]
       enable_translate:
-        description: '🔤 启用插件汉化'
+        description: ' 启用插件汉化'
         required: false
         default: 'true'
         type: boolean
       enable_kernel_sync:
-        description: '🔧 强制同步最新内核'
+        description: ' 强制同步最新内核'
         required: false
         default: 'false'
         type: boolean
@@ -41,7 +42,7 @@ on:
         type: boolean
 
 env:
-  # 📦 源码配置
+  #  源码配置
   REPO_URL: https://github.com/coolsnowwolf/lede.git
   REPO_BRANCH: master
   
@@ -54,7 +55,7 @@ env:
   ENABLE_KERNEL_SYNC: ${{ github.event.inputs.enable_kernel_sync || 'false' }}
   SKIP_FEEDS_MODIFY: ${{ github.event.inputs.skip_feeds_modify || 'false' }}
   
-  #  WiFi 配置
+  # 📶 WiFi 配置
   WIFI_PASSWORD: "1234567890"
   
   # 🏷️ 输出配置
@@ -63,7 +64,7 @@ env:
   CACHE_TOOLCHAIN: true
   TZ: Asia/Shanghai
   
-  # 📁 路径配置（统一使用 github.workspace 避免相对路径歧义）
+  # 📁 路径配置（统一使用 github.workspace 确保绝对路径稳定）
   WORK_DIR: ${{ github.workspace }}/openwrt
   OUTPUT_DIR: ${{ github.workspace }}/output
   DIY_SCRIPT: ${{ github.workspace }}/diy/diy-lede.sh
@@ -84,32 +85,37 @@ jobs:
         echo "📋 编译参数: 机型=${{ env.DEVICE }} 配置=${{ env.CONFIG_VERSION }}"
         df -h
 
-    # 🛠️ 步骤 1: 初始化编译环境
+    # 🛠️ 步骤 1: 初始化编译环境（🔙 恢复 LEDE 标准依赖脚本，确保稳定）
     - name: 🛠️ 初始化编译环境
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo -E apt -yqq purge firefox ghc* zstd clang-12 llvm-12* || true
+        # 🧹 清理无用包释放空间
+        sudo -E apt -yqq purge firefox
         sudo -E apt -yqq update
-        sudo -E apt -yqq install -y \
-          ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
-          bzip2 ccache cmake cpio curl device-tree-compiler flex gawk gcc-multilib g++-multilib \
-          gettext genisoimage git gperf haveged help2man intltool libc6-dev-i386 libelf-dev \
-          libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev \
-          libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev \
-          libtool llvm lrzsz ninja-build p7zip patch pkgconf python3 python3-pyelftools \
-          python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig \
-          texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev dos2unix \
-          libfuse-dev python3-netifaces
-        sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)' || true
-        sudo timedatectl set-timezone "$TZ"
+        sudo -E apt -yqq full-upgrade
+        sudo -E apt -yqq autoremove --purge
+        sudo -E apt -yqq autoclean
+        sudo -E apt -yqq clean
+        
+        # 📦 安装额外依赖
+        sudo -E apt -yqq install dos2unix python3-netifaces libfuse-dev
+        
+        #  使用 immortalwrt 初始化脚本（一键安装 LEDE 完整编译依赖）
+        sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+        
+        # 🔄 重载系统服务 + 设置时区
+        sudo -E systemctl daemon-reload
+        sudo -E timedatectl set-timezone "Asia/Shanghai"
+        
+        # 👤 配置 Git 用户信息
         git config --global user.name 'GitHub Actions'
-        git config --global user.email 'actions@github.com'
-        export PATH="/usr/lib/ccache:$PATH"
-        echo 'export PATH="/usr/lib/ccache:$PATH"' >> ~/.bashrc
-        df -h /
+        git config --global user.email 'noreply@github.com'
+        
+        # 💾 显示磁盘空间
+        df -h
 
-    #  步骤 2: 最大化磁盘空间
+    # 💾 步骤 2: 最大化磁盘空间
     - name: 💾 合并磁盘空间
       uses: easimon/maximize-build-space@master
       with:
@@ -123,17 +129,17 @@ jobs:
       with:
         fetch-depth: 0
 
-    # 📥 步骤 4: 克隆 LEDE 源码
-    - name:  克隆 LEDE 源码
+    #  步骤 4: 克隆 LEDE 源码
+    - name: 📥 克隆 LEDE 源码
       run: |
-        echo "📦 克隆源码: ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }}"
+        echo " 克隆源码: ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }}"
         git clone --single-branch ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }} ${{ env.WORK_DIR }}
         cd ${{ env.WORK_DIR }}
         echo "COMPILE_DATE=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
         echo "FIRMWARE_TAG=$(date +"%Y%m%d")" >> $GITHUB_ENV
         echo "OPENWRT_PATH=${{ env.WORK_DIR }}" >> $GITHUB_ENV
         
-        # 📋 安全提取设备目标（使用绝对路径）
+        # 📋 提取设备目标（使用绝对路径安全读取）
         CONFIG_PATH="${{ github.workspace }}/diy/configs/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config"
         if [ -f "$CONFIG_PATH" ]; then
           echo "DEVICE_TARGET=$(grep '^CONFIG_TARGET_BOARD' "$CONFIG_PATH" | cut -d'"' -f2)" >> $GITHUB_ENV
@@ -141,7 +147,7 @@ jobs:
         fi
 
     # 💾 步骤 5: 缓存工具链
-    - name:  缓存工具链
+    - name: 💾 缓存工具链
       if: env.CACHE_TOOLCHAIN == 'true'
       uses: HiGarfield/cachewrtbuild@main
       with:
@@ -149,10 +155,10 @@ jobs:
         mixkey: lede-${{ env.REPO_BRANCH }}-${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}
         prefix: ${{ env.WORK_DIR }}
 
-    #  步骤 5.5: 复制预配置文件（✅ 修复版：绝对路径）
-    - name: 📁 复制预配置文件到源码
+    # 📁 步骤 5.5: 复制预配置文件到源码（✅ 绝对路径版）
+    - name:  复制预配置文件到源码
       run: |
-        echo " 处理预配置文件..."
+        echo "📁 处理预配置文件..."
         
         log_info() { echo "[✓] $1"; }
         log_warn() { echo "[!] $1"; }
@@ -203,7 +209,7 @@ jobs:
           log_warn "diy/files 目录不存在，跳过预配置"
         fi
 
-    # 🔧 步骤 6: 执行自定义配置脚本（🔴 核心修复：绝对路径 + 安全校验）
+    # 🔧 步骤 6: 执行自定义配置脚本（✅ 绝对路径 + 安全校验）
     - name: 🔧 执行自定义配置脚本
       run: |
         # 📁 切换到源码工作目录
@@ -212,14 +218,11 @@ jobs:
         # 🔧 定义脚本绝对路径
         SCRIPT_PATH="${{ env.DIY_SCRIPT }}"
         
-        # 🔍 安全检查：确保脚本存在且可执行
+        # 🔍 安全检查：确保脚本存在
         if [ ! -f "$SCRIPT_PATH" ]; then
           echo "❌ 致命错误：找不到脚本 $SCRIPT_PATH"
           echo "📋 当前工作区结构:"
           ls -la "${{ github.workspace }}/"
-          echo ""
-          echo "📋 diy 目录内容:"
-          ls -la "${{ github.workspace }}/diy/" 2>/dev/null || echo "❌ diy 目录不存在"
           exit 1
         fi
         
@@ -238,7 +241,7 @@ jobs:
         export SCRIPTS_DIR="${{ github.workspace }}/diy/scripts"
         export FILES_DIR="${{ github.workspace }}/diy/files"
         
-        # 📶 根据机型动态设置前缀与名称（Shell 逻辑更稳定）
+        # 📶 根据机型动态设置前缀与名称
         case "$DEVICE" in
           xdr6088) export WIFI_PREFIX="TP-LINK_"; export DEVICE_NAME="TP-LINK XDR6088" ;;
           ax6000)  export WIFI_PREFIX="Redmi_";  export DEVICE_NAME="Redmi AX6000" ;;
@@ -270,7 +273,7 @@ jobs:
         find dl -size -1024c -exec rm -f {} \; 2>/dev/null || true
 
     # 🏗️ 步骤 8: 编译固件
-    - name: ️ 编译固件
+    - name: 🏗️ 编译固件
       id: compile
       run: |
         cd ${{ env.WORK_DIR }}
@@ -284,7 +287,7 @@ jobs:
         MAKE_EXIT=${PIPESTATUS[0]}
         
         if [ "$MAKE_EXIT" -ne 0 ]; then
-          echo "️ 编译失败，尝试智能修复..."
+          echo "⚠️ 编译失败，尝试智能修复..."
           if grep -q "Error 255\|check_data_file_clashes" "$LOG_FILE"; then
             CONFLICT_PKG=$(grep -oP "check_data_file_clashes: Package \K\S+" "$LOG_FILE" | head -1)
             [ -z "$CONFLICT_PKG" ] && CONFLICT_PKG=$(grep -oP "Cannot install package \K\S+" "$LOG_FILE" | head -1)
@@ -330,7 +333,7 @@ jobs:
         echo "FIRMWARE_PATH=${{ env.OUTPUT_DIR }}" >> $GITHUB_ENV
 
     # 📤 步骤 10: 上传 Artifact
-    - name: 📤 上传固件到 Artifact
+    - name:  上传固件到 Artifact
       if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE != 'true'
       uses: actions/upload-artifact@v4
       with:
@@ -356,13 +359,13 @@ jobs:
           |------|-----|
           | 💻 平台 | ${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }} |
           | 📂 源码 | [coolsnowwolf/lede](${{ env.REPO_URL }}) |
-          | 🕐 编译时间 | ${{ env.COMPILE_DATE }} |
+          |  编译时间 | ${{ env.COMPILE_DATE }} |
           
           ### 🔧 默认配置
-          -  管理地址: `192.168.1.1`
+          - 🌐 管理地址: `192.168.1.1`
           - 👤 用户名: `root`
           - 🔒 密码: **首次登录强制修改**
-          -  WiFi: 前缀`${{ env.DEVICE == 'xdr6088' && 'TP-LINK_' || 'OpenWrt_' }}` + MAC_2G/5G
+          - 📶 WiFi: 前缀`${{ env.DEVICE == 'xdr6088' && 'TP-LINK_' || 'OpenWrt_' }}` + MAC_2G/5G
           
           ### ⚠️ 注意事项
           1. 首次刷写: `sysupgrade -n firmware.bin`
