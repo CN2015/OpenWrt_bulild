@@ -1,8 +1,8 @@
 # ============================================================================
-# OpenWrt LEDE 自动化编译系统 v3.8.16-GA (最终稳定版)
+# OpenWrt LEDE 自动化编译系统 v3.8.16-GA (日志增强版)
 # 功能：系统检测 + 依赖安装 + 源码管理 + 智能配置 + 冲突预检 + 汉化 + 编译重试
 # 适配：TP-LINK XDR6088 / REDMI AX6000 / 自定义机型
-# 核心修复：恢复 LEDE 标准依赖初始化 / 全面使用绝对路径 / 优化变量传递
+# 核心优化：增强编译日志输出 / 分段显示进度 / 详细错误检查
 # ============================================================================
 
 name: Builder OpenWrt Multi-Device
@@ -26,12 +26,12 @@ on:
         type: choice
         options: [full, mini, custom]
       enable_translate:
-        description: ' 启用插件汉化'
+        description: '🔤 启用插件汉化'
         required: false
         default: 'true'
         type: boolean
       enable_kernel_sync:
-        description: ' 强制同步最新内核'
+        description: '🔧 强制同步最新内核'
         required: false
         default: 'false'
         type: boolean
@@ -42,7 +42,7 @@ on:
         type: boolean
 
 env:
-  #  源码配置
+  # 📦 源码配置
   REPO_URL: https://github.com/coolsnowwolf/lede.git
   REPO_BRANCH: master
   
@@ -85,7 +85,7 @@ jobs:
         echo "📋 编译参数: 机型=${{ env.DEVICE }} 配置=${{ env.CONFIG_VERSION }}"
         df -h
 
-    # 🛠️ 步骤 1: 初始化编译环境（🔙 恢复 LEDE 标准依赖脚本，确保稳定）
+    # 🛠️ 步骤 1: 初始化编译环境（🔙 恢复 LEDE 标准依赖脚本）
     - name: 🛠️ 初始化编译环境
       env:
         DEBIAN_FRONTEND: noninteractive
@@ -101,7 +101,7 @@ jobs:
         # 📦 安装额外依赖
         sudo -E apt -yqq install dos2unix python3-netifaces libfuse-dev
         
-        #  使用 immortalwrt 初始化脚本（一键安装 LEDE 完整编译依赖）
+        # 🌐 使用 immortalwrt 初始化脚本（一键安装 LEDE 完整编译依赖）
         sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
         
         # 🔄 重载系统服务 + 设置时区
@@ -129,10 +129,10 @@ jobs:
       with:
         fetch-depth: 0
 
-    #  步骤 4: 克隆 LEDE 源码
+    # 📥 步骤 4: 克隆 LEDE 源码
     - name: 📥 克隆 LEDE 源码
       run: |
-        echo " 克隆源码: ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }}"
+        echo "📦 克隆源码: ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }}"
         git clone --single-branch ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }} ${{ env.WORK_DIR }}
         cd ${{ env.WORK_DIR }}
         echo "COMPILE_DATE=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
@@ -155,8 +155,8 @@ jobs:
         mixkey: lede-${{ env.REPO_BRANCH }}-${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}
         prefix: ${{ env.WORK_DIR }}
 
-    # 📁 步骤 5.5: 复制预配置文件到源码（✅ 绝对路径版）
-    - name:  复制预配置文件到源码
+    # 📁 步骤 5.5: 复制预配置文件到源码
+    - name: 📁 复制预配置文件到源码
       run: |
         echo "📁 处理预配置文件..."
         
@@ -209,7 +209,7 @@ jobs:
           log_warn "diy/files 目录不存在，跳过预配置"
         fi
 
-    # 🔧 步骤 6: 执行自定义配置脚本（✅ 绝对路径 + 安全校验）
+    # 🔧 步骤 6: 执行自定义配置脚本
     - name: 🔧 执行自定义配置脚本
       run: |
         # 📁 切换到源码工作目录
@@ -272,7 +272,7 @@ jobs:
         }
         find dl -size -1024c -exec rm -f {} \; 2>/dev/null || true
 
-    # 🏗️ 步骤 8: 编译固件
+    # 🏗️ 步骤 8: 编译固件（📊 增强日志版）
     - name: 🏗️ 编译固件
       id: compile
       run: |
@@ -280,60 +280,238 @@ jobs:
         mkdir -p "${{ env.OUTPUT_DIR }}"
         LOG_FILE="${{ env.OUTPUT_DIR }}/build.log"
         
-        echo "🚀 开始编译 (线程: $(nproc))..."
+        echo "=========================================="
+        echo "🏗️  OpenWrt 编译开始"
+        echo "=========================================="
+        echo "📅 时间: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "💻 设备: ${{ env.DEVICE }}"
+        echo "🔧 线程: $(nproc)"
+        echo "📁 工作目录: $(pwd)"
+        echo "=========================================="
+        
         START_TIME=$(date +%s)
         
-        make -j$(nproc) V=s 2>&1 | tee "$LOG_FILE"
+        # 📋 检查 .config 文件
+        echo ""
+        echo "🔍 检查配置文件..."
+        if [ ! -f ".config" ]; then
+          echo "❌ 错误：.config 文件不存在"
+          exit 1
+        fi
+        
+        # 📊 显示配置摘要
+        echo "📋 已选插件数量: $(grep -c '^CONFIG_PACKAGE_.*=y' .config)"
+        echo "📋 目标平台: $(grep '^CONFIG_TARGET_BOARD' .config | cut -d'"' -f2)"
+        echo ""
+        
+        # 🔄 执行编译（带详细日志）
+        echo "🚀 开始编译（详细日志将保存到 $LOG_FILE）..."
+        echo "=========================================="
+        
+        # 阶段 1: 编译（实时显示关键信息）
+        {
+          echo ""
+          echo "=== 阶段 1/2: 编译固件 ==="
+          echo "开始时间: $(date '+%H:%M:%S')"
+          echo ""
+          
+          make -j$(nproc) V=s 2>&1 | tee -a "$LOG_FILE" | \
+          grep -E "(ERROR|error:|Leaving directory|Building|Package|Time:|real|m)" | tail -100
+          
+        } || {
+          echo ""
+          echo "❌ 编译失败！检查日志..."
+        }
+        
         MAKE_EXIT=${PIPESTATUS[0]}
         
+        # 📊 编译结果检查
+        echo ""
+        echo "=========================================="
+        echo "📊 编译结果检查"
+        echo "=========================================="
+        
         if [ "$MAKE_EXIT" -ne 0 ]; then
-          echo "⚠️ 编译失败，尝试智能修复..."
-          if grep -q "Error 255\|check_data_file_clashes" "$LOG_FILE"; then
+          echo "⚠️  编译退出码: $MAKE_EXIT"
+          echo ""
+          
+          # 🔍 尝试智能修复
+          if grep -q "Error 255\|check_data_file_clashes\|opkg_install_cmd.*Cannot install" "$LOG_FILE"; then
+            echo "🔧 检测到包冲突，尝试自动解决..."
+            
             CONFLICT_PKG=$(grep -oP "check_data_file_clashes: Package \K\S+" "$LOG_FILE" | head -1)
             [ -z "$CONFLICT_PKG" ] && CONFLICT_PKG=$(grep -oP "Cannot install package \K\S+" "$LOG_FILE" | head -1)
+            
             if [ -n "$CONFLICT_PKG" ]; then
               echo "📦 冲突包: $CONFLICT_PKG"
               sed -i "s/^CONFIG_PACKAGE_${CONFLICT_PKG}=[ym]/# CONFIG_PACKAGE_${CONFLICT_PKG} is not set/" .config
               sed -i "s/^CONFIG_PACKAGE_luci-app-${CONFLICT_PKG}=[ym]/# CONFIG_PACKAGE_luci-app-${CONFLICT_PKG} is not set/" .config 2>/dev/null || true
+              
               make defconfig >/dev/null 2>&1
+              echo "🔄 重试打包阶段..."
               make package/install -j1 V=s 2>&1 | tee -a "$LOG_FILE"
             fi
+          else
+            echo "❌ 无法自动修复，请查看完整日志"
+            echo ""
+            echo "📋 最后 50 行日志:"
+            tail -50 "$LOG_FILE"
           fi
         fi
         
+        # 阶段 2: 检查固件生成
+        echo ""
+        echo "=== 阶段 2/2: 检查固件生成 ==="
+        echo "完成时间: $(date '+%H:%M:%S')"
+        echo ""
+        
         END_TIME=$(date +%s)
         DURATION=$((END_TIME - START_TIME))
-        echo "⏱️ 编译耗时: $((DURATION/3600))h $((DURATION%3600/60))m $((DURATION%60))s"
+        echo "⏱️  总耗时: $((DURATION/3600))h $((DURATION%3600/60))m $((DURATION%60))s"
+        echo ""
         
-        if [ ${PIPESTATUS[0]} -eq 0 ] || [ -f "bin/targets/*/sysupgrade.bin" ]; then
-          echo "status=success" >> $GITHUB_OUTPUT
-          echo "✅ 编译成功"
+        # 🔍 搜索固件文件
+        echo "🔍 搜索生成的固件文件..."
+        FIRMWARE_COUNT=$(find bin/targets -name "*.bin" -type f 2>/dev/null | wc -l)
+        echo "📦 找到固件文件数量: $FIRMWARE_COUNT"
+        
+        if [ "$FIRMWARE_COUNT" -gt 0 ]; then
+          echo ""
+          echo "✅ 固件文件列表:"
+          find bin/targets -name "*.bin" -type f -exec ls -lh {} \; 2>/dev/null | head -10
+          echo ""
+          
+          # 📋 显示 sysupgrade.bin
+          echo "🎯 sysupgrade.bin 固件:"
+          find bin/targets -name "*sysupgrade.bin" -type f 2>/dev/null | while read -r fw; do
+            ls -lh "$fw"
+            sha256sum "$fw" | cut -d' ' -f1
+          done
         else
-          echo "❌ 编译失败"
+          echo ""
+          echo "⚠️  警告：未找到 .bin 固件文件"
+          echo "📋 检查 bin/targets 目录结构:"
+          ls -la bin/targets/ 2>/dev/null || echo "❌ bin/targets 目录不存在"
+          echo ""
+          echo "📋 bin 目录内容:"
+          ls -la bin/ 2>/dev/null | head -20
+        fi
+        
+        echo ""
+        echo "=========================================="
+        
+        # ✅ 最终判断
+        if [ "$MAKE_EXIT" -eq 0 ] && [ "$FIRMWARE_COUNT" -gt 0 ]; then
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "✅ 编译成功！"
+          echo "=========================================="
+        else
+          echo "status=failed" >> $GITHUB_OUTPUT
+          echo "❌ 编译失败或固件生成异常"
+          echo "=========================================="
+          echo ""
+          echo "📖 排查建议："
+          echo "  1. 查看完整日志：点击设置图标 → View raw logs"
+          echo "  2. 检查配置文件：CONFIG_TARGET_* 是否正确"
+          echo "  3. 检查磁盘空间：df -h"
+          echo "  4. 查看错误日志：$LOG_FILE"
           exit 1
         fi
 
-    # 🗂️ 步骤 9: 整理固件
+    # 🗂️ 步骤 9: 整理固件文件（🔍 增强调试版）
     - name: 🗂️ 整理固件文件
       if: steps.compile.outputs.status == 'success'
       run: |
-        cd ${{ env.WORK_DIR }}/bin/targets/*/*/
-        mkdir -p ${{ env.OUTPUT_DIR }}
-        FIRMWARE=$(ls *sysupgrade.bin 2>/dev/null | head -1)
-        if [ -n "$FIRMWARE" ]; then
-          NEW_NAME="OpenWrt-${{ env.DEVICE }}-$(date +"%Y%m%d")-$(echo $FIRMWARE | grep -oP 'sysupgrade\.\K\w+').bin"
-          mv "$FIRMWARE" "${{ env.OUTPUT_DIR }}/$NEW_NAME"
-          echo "FIRMWARE_NAME=$NEW_NAME" >> $GITHUB_ENV
+        cd ${{ env.WORK_DIR }}
+        
+        echo "=========================================="
+        echo "🗂️  开始整理固件文件"
+        echo "=========================================="
+        
+        # 🔍 详细搜索固件
+        echo ""
+        echo "🔍 搜索所有 .bin 文件..."
+        find bin/targets -name "*.bin" -type f 2>/dev/null | while read -r f; do
+          SIZE=$(ls -lh "$f" | awk '{print $5}')
+          echo "  📦 $f ($SIZE)"
+        done
+        
+        echo ""
+        echo "🎯 查找 sysupgrade.bin..."
+        FIRMWARE_PATH=$(find bin/targets -name "*sysupgrade.bin" -type f 2>/dev/null | head -1)
+        
+        if [ -z "$FIRMWARE_PATH" ]; then
+          echo "❌ 错误：未找到 sysupgrade.bin"
+          echo ""
+          echo "📋 bin/targets 目录结构:"
+          ls -laR bin/targets/ 2>/dev/null | head -50
+          echo ""
+          echo "⚠️  可能原因："
+          echo "  1. 配置文件未启用固件生成"
+          echo "  2. 目标平台选择错误"
+          echo "  3. 编译过程被中断"
+          exit 1
         fi
+        
+        echo "✅ 找到固件: $FIRMWARE_PATH"
+        ls -lh "$FIRMWARE_PATH"
+        
+        # 📁 创建输出目录
+        mkdir -p ${{ env.OUTPUT_DIR }}
+        
+        # 🔧 重命名固件
+        FIRMWARE_BASE=$(basename "$FIRMWARE_PATH" .bin)
+        NEW_NAME="OpenWrt-${{ env.DEVICE }}-$(date +"%Y%m%d")-${FIRMWARE_BASE#*-}.bin"
+        
+        echo ""
+        echo "📝 重命名固件..."
+        echo "  原名: $(basename "$FIRMWARE_PATH")"
+        echo "  新名: $NEW_NAME"
+        
+        cp "$FIRMWARE_PATH" "${{ env.OUTPUT_DIR }}/$NEW_NAME"
+        echo "FIRMWARE_NAME=$NEW_NAME" >> $GITHUB_ENV
+        
+        # 📋 生成校验和
+        echo ""
+        echo "🔐 生成 SHA256 校验和..."
         sha256sum "${{ env.OUTPUT_DIR }}"/*.bin > "${{ env.OUTPUT_DIR }}/sha256sums.txt"
+        cat "${{ env.OUTPUT_DIR }}/sha256sums.txt"
+        
+        # 💾 备份配置
+        echo ""
+        echo "💾 备份配置文件..."
         cp ${{ env.WORK_DIR }}/.config "${{ env.OUTPUT_DIR }}/build.config"
-        mkdir -p "${{ env.OUTPUT_DIR }}/packages"
-        find ${{ env.WORK_DIR }}/bin/packages -name "*.ipk" -exec cp {} "${{ env.OUTPUT_DIR }}/packages/" \; 2>/dev/null || true
-        tar -czf "${{ env.OUTPUT_DIR }}/packages.tar.gz" -C "${{ env.OUTPUT_DIR }}" packages
+        echo "✅ 已备份: build.config"
+        
+        # 📦 打包 IPK（可选）
+        if [ -d "bin/packages" ]; then
+          echo ""
+          echo "📦 打包 IPK 插件..."
+          mkdir -p "${{ env.OUTPUT_DIR }}/packages"
+          IPK_COUNT=$(find bin/packages -name "*.ipk" -type f 2>/dev/null | wc -l)
+          echo "  找到 IPK 文件: $IPK_COUNT 个"
+          
+          find bin/packages -name "*.ipk" -exec cp {} "${{ env.OUTPUT_DIR }}/packages/" \; 2>/dev/null || true
+          tar -czf "${{ env.OUTPUT_DIR }}/packages.tar.gz" -C "${{ env.OUTPUT_DIR }}" packages
+          
+          PKG_SIZE=$(ls -lh "${{ env.OUTPUT_DIR }}/packages.tar.gz" | awk '{print $5}')
+          echo "  打包完成: packages.tar.gz ($PKG_SIZE)"
+        fi
+        
         echo "FIRMWARE_PATH=${{ env.OUTPUT_DIR }}" >> $GITHUB_ENV
+        
+        echo ""
+        echo "=========================================="
+        echo "✅ 固件整理完成！"
+        echo "=========================================="
+        echo ""
+        echo "📦 输出文件列表:"
+        ls -lh ${{ env.OUTPUT_DIR }}/
+        echo ""
+        echo "🎉 下一步将自动发布到 Release"
 
     # 📤 步骤 10: 上传 Artifact
-    - name:  上传固件到 Artifact
+    - name: 📤 上传固件到 Artifact
       if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE != 'true'
       uses: actions/upload-artifact@v4
       with:
@@ -359,7 +537,7 @@ jobs:
           |------|-----|
           | 💻 平台 | ${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }} |
           | 📂 源码 | [coolsnowwolf/lede](${{ env.REPO_URL }}) |
-          |  编译时间 | ${{ env.COMPILE_DATE }} |
+          | 🕐 编译时间 | ${{ env.COMPILE_DATE }} |
           
           ### 🔧 默认配置
           - 🌐 管理地址: `192.168.1.1`
