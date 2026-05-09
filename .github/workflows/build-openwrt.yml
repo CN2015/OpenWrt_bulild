@@ -1,11 +1,11 @@
 # ============================================================================
-# OpenWrt LEDE 自动化编译
+# OpenWrt LEDE 自动化编译 XDR6088 专版
 # 源码：https://github.com/coolsnowwolf/lede
 # 适配：TP-Link TL-XDR6088 (mediatek/filogic)
 # 内核：6.12 (测试版)
 # ============================================================================
 
-name: Builder OpenWrt 
+name: Builder OpenWrt TP_LINK XDR6088
 
 # 🔁 触发条件
 on:
@@ -288,3 +288,5 @@ jobs:
           $GITHUB_WORKSPACE/openwrt/build.log
           $GITHUB_WORKSPACE/openwrt/feeds.conf.default
         retention-days: 3
+
+
