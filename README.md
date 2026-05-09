@@ -2,7 +2,7 @@
 
 > 基于 GitHub Actions 的 LEDE 固件自动编译方案，支持多机型/智能配置/冲突预检/汉化定制
 
-[![Build Status](https://github.com/USER/REPO/actions/workflows/build-openwrt.yml/badge.svg)](https://github.com/USER/REPO/actions)
+
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-LEDE-orange)](https://github.com/coolsnowwolf/lede)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
