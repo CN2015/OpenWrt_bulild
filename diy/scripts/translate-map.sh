@@ -90,15 +90,19 @@ declare -gA TRANSLATE_MAP=(
     ["SoftEther VPN 服务器"]="SoftEther"
 )
 
-# 🔧 辅助函数：批量替换文件中的插件名
+# 🔧 辅助函数：批量替换文件中的插件名（优化版）
 translate_file() {
     local file="$1"
     local count=0
     
+    # 🔴 优化：单次读取文件内容，避免多次 grep IO
+    local content
+    content=$(cat "$file" 2>/dev/null) || return 0
+    
     for old_name in "${!TRANSLATE_MAP[@]}"; do
         local new_name="${TRANSLATE_MAP[$old_name]}"
         # 🔍 精准替换双引号包裹的名称（避免误替换代码变量）
-        if grep -q "\"$old_name\"" "$file" 2>/dev/null; then
+        if [[ "$content" == *"\"$old_name\""* ]]; then
             sed -i "s|\"$old_name\"|\"$new_name\"|g" "$file"
             ((count++)) || true
         fi

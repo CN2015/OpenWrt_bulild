@@ -251,9 +251,10 @@ apply_translate() {
     if declare -f translate_file &>/dev/null; then
         info "  🔄 使用 translate-map.sh 进行汉化..."
         local count=0
-        find package feeds -type f \( -name "*.lua" -o -name "*.po" -o -name "*zh-cn*" \) 2>/dev/null | while read -r file; do
+        # 🔴 优化：使用 -print0 和 read -d '' 处理含空格的文件名
+        while IFS= read -r -d '' file; do
             translate_file "$file" 2>/dev/null && ((count++)) || true
-        done
+        done < <(find package feeds -type f \( -name "*.lua" -o -name "*.po" -o -name "*zh-cn*" \) -print0 2>/dev/null)
         info "✓ 汉化完成 (辅助脚本): 处理 $count 个文件"
         return 0
     fi
@@ -268,10 +269,10 @@ apply_translate() {
     local count=0
     for old_name in "${!TRANSLATE_MAP[@]}"; do
         new_name="${TRANSLATE_MAP[$old_name]}"
-        find package feeds -type f \( -name "*.lua" -o -name "*.po" \) -exec grep -l "\"$old_name\"" {} \; 2>/dev/null | while read -r file; do
+        while IFS= read -r -d '' file; do
             sed -i "s|\"$old_name\"|\"$new_name\"|g" "$file"
             ((count++)) || true
-        done
+        done < <(find package feeds -type f \( -name "*.lua" -o -name "*.po" \) -print0 -exec grep -l "\"$old_name\"" {} \; 2>/dev/null)
         [ $count -gt 0 ] && info "  『$old_name』→ 『$new_name』"
     done
     
