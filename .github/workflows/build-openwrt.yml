@@ -1,5 +1,5 @@
 # ============================================================================
-# OpenWrt 自动化编译系统 - LEDE 专用版
+# OpenWrt 自动化编译系统 - LEDE 专用版（优化版）
 # 源码：https://github.com/coolsnowwolf/lede
 # 适配：红米 AX6000 / TP-LINK XDR6088
 # ============================================================================
@@ -8,18 +8,17 @@ name: Build OpenWrt LEDE
 
 # 🌍 全局环境变量
 env:
-  REPO_URL: https://github.com/coolsnowwolf/lede      # 📦 LEDE 源码地址
-  REPO_BRANCH: master                                   # 🌳 源码分支
-  CONFIG_DIR: config                                    # ⚙️ 配置文件目录
-  DIY_P1_SH: diy/diy-part1.sh                          # 🔧 脚本1：配置 feeds 前
-  DIY_P2_SH: diy/diy-part2.sh                          # 🔧 脚本2：配置完成后
-  UPLOAD_FIRMWARE: true                                # 📤 是否上传固件到 Artifact
-  UPLOAD_RELEASE: true                                 # 🚀 是否发布到 GitHub Release
-  TZ: Asia/Shanghai                                    # 🕐 时区设置
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  REPO_BRANCH: master
+  CONFIG_DIR: config
+  DIY_P1_SH: diy/diy-part1.sh
+  DIY_P2_SH: diy/diy-part2.sh
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: true
+  TZ: Asia/Shanghai
 
 # 🔁 触发条件
 on:
-  # 🖱️ 手动触发（支持参数）
   workflow_dispatch:
     inputs:
       device:
@@ -39,16 +38,12 @@ on:
         options:
           - 'true'
           - 'false'
-  
-  # ⏰ 定时触发（每周日 03:00 UTC+8，按需开启）
-  # schedule:
-  #   - cron: '0 19 * * 0'
 
 # 💻 编译任务
 jobs:
   build:
-    runs-on: ubuntu-20.04  # 🖥️ 必须使用 20.04，22.04 可能有兼容问题
-    timeout-minutes: 360   # ⏱️ 6 小时超时保护
+    runs-on: ubuntu-20.04
+    timeout-minutes: 360
 
     steps:
     
@@ -56,14 +51,14 @@ jobs:
     - name: 🔍 检出仓库代码
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # 📥 获取完整历史（用于生成版本信息）
+        fetch-depth: 0
 
     # 🛠️ 步骤 2: 初始化编译环境
     - name: 🛠️ 初始化编译环境
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        # 🧹 清理无用组件释放空间（关键！避免磁盘满）
+        # 🧹 清理无用组件释放空间
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo apt-mark hold grub-efi-amd64-signed
         
@@ -71,7 +66,7 @@ jobs:
         sudo -E apt-get -qq update
         sudo -E apt-get -qq full-upgrade
         
-        # 📦 安装编译依赖（LEDE 官方推荐列表）
+        # 📦 安装编译依赖
         sudo -E apt-get -qq install -y \
           ack antlr3 asciidoc autoconf automake autopoint binutils bison \
           build-essential bzip2 ccache cmake cpio curl device-tree-compiler \
@@ -88,49 +83,46 @@ jobs:
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         
-        # 🕐 设置时区
+        # 🕐 设置时区 + 用户配置
         sudo timedatectl set-timezone "$TZ"
+        git config --global user.name 'GitHub Actions'
+        git config --global user.email 'noreply@github.com'
         
-        # 📁 创建工作目录
-        sudo mkdir -p /workdir
-        sudo chown $USER:$GROUPS /workdir
+        # 💾 显示磁盘空间
+        df -h
 
-    # 📥 步骤 3: 克隆 LEDE 源码
+    # 📥 步骤 3: 克隆 LEDE 源码（简化路径逻辑）
     - name: 📥 克隆 LEDE 源码
-      working-directory: /workdir
       run: |
-        df -hT $PWD  # 💾 显示磁盘空间
+        df -hT $GITHUB_WORKSPACE
         git clone $REPO_URL -b $REPO_BRANCH --single-branch openwrt
-        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
         
         # 🏷️ 记录编译信息
         echo "BUILD_DATE=$(date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
         echo "BUILD_TIME=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+        echo "OPENWRT_PATH=$GITHUB_WORKSPACE/openwrt" >> $GITHUB_ENV
 
-    # 📡 步骤 4: 加载自定义 feeds（执行 diy-part1.sh）
+    # 📡 步骤 4: 加载自定义 feeds
     - name: 📡 加载自定义 feeds
       run: |
-        # 🔐 赋予脚本执行权限
         chmod +x $DIY_P1_SH
-        
-        # 📍 进入源码目录执行
-        cd openwrt
+        cd $OPENWRT_PATH
         $GITHUB_WORKSPACE/$DIY_P1_SH
 
     # 🔄 步骤 5: 更新 feeds 索引
     - name: 🔄 更新 feeds 索引
-      run: cd openwrt && ./scripts/feeds update -a
+      run: cd $OPENWRT_PATH && ./scripts/feeds update -a
 
     # 📦 步骤 6: 安装 feeds 软件包
     - name: 📦 安装 feeds 软件包
-      run: cd openwrt && ./scripts/feeds install -a
+      run: cd $OPENWRT_PATH && ./scripts/feeds install -a
 
     # ⚙️ 步骤 7: 加载设备配置 + 执行 diy-part2.sh
     - name: ⚙️ 加载设备配置
       run: |
-        cd openwrt
+        cd $OPENWRT_PATH
         
-        # 📋 复制设备配置文件为 .config
+        # 📋 复制设备配置文件
         DEVICE="${{ github.event.inputs.device || 'ax6000' }}"
         CONFIG_PATH="$GITHUB_WORKSPACE/$CONFIG_DIR/${DEVICE}.config"
         
@@ -142,33 +134,29 @@ jobs:
           exit 1
         fi
         
-        # 📁 复制 files 目录（预配置网络/WiFi）
-        [ -d "$GITHUB_WORKSPACE/files" ] && cp -rf "$GITHUB_WORKSPACE/files" .
-        
         # 🔧 执行 diy-part2.sh
-        chmod +x $GITHUB_WORKSPACE/$DIY_P2_SH
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+        if [ -x "$GITHUB_WORKSPACE/$DIY_P2_SH" ]; then
+          chmod +x "$GITHUB_WORKSPACE/$DIY_P2_SH"
+          $GITHUB_WORKSPACE/$DIY_P2_SH
+        fi
 
     # 📥 步骤 8: 下载软件包
     - name: 📥 下载软件包
       run: |
-        cd openwrt
-        make defconfig  # ⚙️ 生成完整配置
-        
-        # 🌐 多线程下载 + 清理失败文件
+        cd $OPENWRT_PATH
+        make defconfig
         make download -j8
         find dl -size -1024c -exec rm -f {} \; 2>/dev/null || true
 
-    # 🏗️ 步骤 9: 编译固件（核心步骤）
+    # 🏗️ 步骤 9: 编译固件
     - name: 🏗️ 编译固件
       id: compile
       run: |
-        cd openwrt
+        cd $OPENWRT_PATH
         
-        # 💻 显示编译线程数
         echo "🚀 使用 $(nproc) 线程编译"
         
-        # 🔨 编译命令：优先多线程，失败则单线程重试
+        # 🔨 编译 + 失败降级重试
         make -j$(nproc) V=s 2>&1 | tee "$GITHUB_WORKSPACE/build.log" || \
         make -j1 V=s 2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
         
@@ -180,10 +168,9 @@ jobs:
           exit 1
         fi
         
-        # 🏷️ 提取设备名称用于固件命名
-        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | \
-          sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        # 🏷️ 提取设备名称
+        DEVICE_NAME=$(grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' | head -1)
+        [ -n "$DEVICE_NAME" ] && echo "DEVICE_NAME=_$DEVICE_NAME" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
     # 🗂️ 步骤 10: 整理固件文件
@@ -191,21 +178,39 @@ jobs:
       id: organize
       if: steps.compile.outputs.status == 'success'
       run: |
-        cd openwrt/bin/targets/*/*
-        rm -rf packages  # 🗑️ 删除冗余 packages 目录
+        # 📍 动态定位固件目录
+        FIRMWARE_DIR=$(find $OPENWRT_PATH/bin/targets -type d -name "filogic" -o -name "ramips" -o -name "x86" 2>/dev/null | head -1)
+        [ -z "$FIRMWARE_DIR" ] && FIRMWARE_DIR=$(find $OPENWRT_PATH/bin/targets -type d | grep -E "targets/.*/.*$" | head -1)
+        
+        cd "$FIRMWARE_DIR"
+        rm -rf packages
+        
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
         
-        # 📝 生成固件信息
-        echo "## 📒 固件信息" > release.txt
-        echo "" >> release.txt
-        echo "| 项目 | 值 |" >> release.txt
-        echo "|------|-----|" >> release.txt
-        echo "| 💻 设备 | ${{ github.event.inputs.device || 'ax6000' }} |" >> release.txt
-        echo "| 🕐 编译时间 | ${{ env.BUILD_DATE }} |" >> release.txt
-        echo "| 📦 固件大小 | $(du -h *.bin | cut -f1) |" >> release.txt
+        # 📝 生成发布说明
+        cat > "$GITHUB_WORKSPACE/release.txt" << EOF
+## 📒 固件信息
 
-    # 📤 步骤 11: 上传固件到 Artifact（供测试下载）
+| 项目 | 值 |
+|------|-----|
+| 💻 设备 | ${{ github.event.inputs.device || 'ax6000' }} |
+| 📂 源码 | [coolsnowwolf/lede]($REPO_URL) |
+| 🌳 分支 | $REPO_BRANCH |
+| 🕐 编译时间 | ${{ env.BUILD_DATE }} |
+| 📦 固件大小 | $(du -h *.bin 2>/dev/null | cut -f1 | head -1) |
+
+## 🔧 默认配置
+- 🌐 管理地址: \`192.168.1.1\`
+- 👤 用户名: \`root\`
+- 🔒 密码: **(首次登录强制修改)**
+
+## ⚠️ 注意事项
+1. 首次刷写建议使用 \`sysupgrade -n\` 清空配置
+2. 固件校验: \`sha256sum -c *.sha256\`
+EOF
+
+    # 📤 步骤 11: 上传固件到 Artifact
     - name: 📤 上传固件到 Artifact
       uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true'
@@ -221,21 +226,31 @@ jobs:
       with:
         name: LEDE-${{ github.event.inputs.device || 'ax6000' }}-${{ env.BUILD_DATE }}
         tag_name: LEDE-${{ github.event.inputs.device || 'ax6000' }}-${{ env.BUILD_TIME }}
-        body_path: openwrt/bin/targets/*/*/release.txt
-        files: ${{ env.FIRMWARE }}/*.bin
+        body_path: $GITHUB_WORKSPACE/release.txt
+        files: |
+          ${{ env.FIRMWARE }}/*.bin
         draft: false
         prerelease: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    # 🗑️ 步骤 13: 清理旧的工作流记录（节省存储空间）
+    # 📝 步骤 13: 上传编译日志（便于排查）
+    - name: 📝 上传编译日志
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-${{ github.event.inputs.device || 'ax6000' }}-${{ env.BUILD_TIME }}
+        path: $GITHUB_WORKSPACE/build.log
+        retention-days: 3
+
+    # 🗑️ 步骤 14: 清理旧的工作流记录
     - name: 🗑️ 清理旧的工作流记录
-      uses: GitRML/delete-workflow-runs@main
+      uses: GitRML/delete-workflow-runs@v1
       with:
         retain_days: 1
         keep_minimum_runs: 3
 
-    # 🗑️ 步骤 14: 清理旧的 Release（保留最新 3 个）
+    # 🗑️ 步骤 15: 清理旧的 Release
     - name: 🗑️ 清理旧的 Release
       uses: dev-drprasad/delete-older-releases@v0.2.1
       if: env.UPLOAD_RELEASE == 'true'
