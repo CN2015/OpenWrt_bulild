@@ -10,6 +10,7 @@ WIFI_PREFIX="${WIFI_PREFIX:-OpenWrt_}"
 WIFI_PASSWORD="${WIFI_PASSWORD:-1234567890}"
 COUNTRY_CODE="${COUNTRY_CODE:-CN}"
 OUTPUT_FILE=""
+MAC_SUFFIX_CACHE=""  # 🔴 缓存 MAC 后缀避免重复读取
 
 # 🎨 颜色输出
 RED='\033[0;31m' GREEN='\033[0;32m' NC='\033[0m'
@@ -35,18 +36,23 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# 🔧 生成 MAC 后缀（模拟运行时获取）
-# ⚠️  实际在路由器上执行时会替换为真实 MAC
+# 🔧 生成 MAC 后缀（带缓存优化）
 generate_mac_suffix() {
+    # 🔴 返回缓存值（如果有）
+    [ -n "$MAC_SUFFIX_CACHE" ] && { echo "$MAC_SUFFIX_CACHE"; return; }
+    
     # 🎲 开发模式：使用随机后缀（避免冲突）
     if [ "${DRY_RUN:-false}" = "true" ]; then
-        echo "XXXX"
-        return
+        MAC_SUFFIX_CACHE="XXXX"
+    else
+        # 📡 生产模式：读取真实 MAC（只读一次）
+        local mac
+        mac=$(cat /sys/class/ieee80211/phy0/macaddress 2>/dev/null | tr -d ':' | head -c12)
+        MAC_SUFFIX_CACHE="${mac: -4}"
+        [ -z "$MAC_SUFFIX_CACHE" ] && MAC_SUFFIX_CACHE="0000"
     fi
     
-    # 📡 生产模式：读取真实 MAC（需 root）
-    local mac=$(cat /sys/class/ieee80211/phy0/macaddress 2>/dev/null | tr -d ':')
-    echo "${mac: -4}"  # 取最后 4 位
+    echo "$MAC_SUFFIX_CACHE"
 }
 
 # 📶 生成单 radio 配置
