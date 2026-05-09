@@ -1,9 +1,8 @@
 # ============================================================================
-# OpenWrt LEDE 自动化编译系统 v3.8.16-GA (日志增强版)
+# OpenWrt LEDE 自动化编译系统 v3.8.16-GA (路径修复版)
 # 功能：系统检测 + 依赖安装 + 源码管理 + 智能配置 + 冲突预检 + 汉化 + 编译重试
 # 适配：TP-LINK XDR6088 / REDMI AX6000 / 自定义机型
-# 核心优化：增强编译日志输出 / 分段显示进度 / 详细错误检查
-# 路径调整：配置文件使用 config/ 目录
+# 核心修复：恢复 LEDE 标准依赖初始化 / 全面使用绝对路径 / 优化变量传递 / 增加强制目标校验
 # ============================================================================
 
 name: Builder OpenWrt Multi-Device
@@ -17,7 +16,7 @@ on:
       device:
         description: '🎯 选择编译机型'
         required: true
-        default: 'xdr6088'
+        default: 'ax6000'
         type: choice
         options: [xdr6088, ax6000, custom]
       config_version:
@@ -48,7 +47,7 @@ env:
   REPO_BRANCH: master
   
   # 🎯 设备配置
-  DEVICE: ${{ github.event.inputs.device || 'xdr6088' }}
+  DEVICE: ${{ github.event.inputs.device || 'ax6000' }}
   CONFIG_VERSION: ${{ github.event.inputs.config_version || 'full' }}
   
   # 🔧 功能开关
@@ -142,20 +141,9 @@ jobs:
         
         # 📋 提取设备目标（使用绝对路径安全读取）
         CONFIG_PATH="${{ github.workspace }}/config/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config"
-        echo "🔍 检查配置文件: $CONFIG_PATH"
-        
         if [ -f "$CONFIG_PATH" ]; then
-          echo "✅ 配置文件存在"
           echo "DEVICE_TARGET=$(grep '^CONFIG_TARGET_BOARD' "$CONFIG_PATH" | cut -d'"' -f2)" >> $GITHUB_ENV
           echo "DEVICE_SUBTARGET=$(grep '^CONFIG_TARGET_SUBTARGET' "$CONFIG_PATH" | cut -d'"' -f2)" >> $GITHUB_ENV
-          
-          # 🔍 显示配置摘要
-          echo "📋 配置摘要:"
-          grep '^CONFIG_TARGET' "$CONFIG_PATH" | head -10
-        else
-          echo "❌ 警告：配置文件不存在: $CONFIG_PATH"
-          echo "📋 检查 config 目录:"
-          ls -la "${{ github.workspace }}/config/" || true
         fi
 
     # 💾 步骤 5: 缓存工具链
@@ -166,6 +154,45 @@ jobs:
         ccache: true
         mixkey: lede-${{ env.REPO_BRANCH }}-${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}
         prefix: ${{ env.WORK_DIR }}
+
+    # ⚙️ 新增步骤：强制应用配置并校验（解决编译平台错误问题）
+    - name: ⚙️ Apply & Verify Configuration
+      run: |
+        cd ${{ env.WORK_DIR }}
+        
+        # 1. 定位并复制配置文件
+        CONFIG_SRC="${{ github.workspace }}/config/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config"
+        echo "📋 正在应用配置文件: $CONFIG_SRC"
+        
+        if [ ! -f "$CONFIG_SRC" ]; then
+          echo "❌ 错误：找不到配置文件 $CONFIG_SRC"
+          ls -la "${{ github.workspace }}/config/" || echo "目录不存在"
+          exit 1
+        fi
+        
+        cp -f "$CONFIG_SRC" .config
+        
+        # 2. 执行 defconfig 解析依赖
+        echo "🔄 正在解析配置依赖 (make defconfig)..."
+        make defconfig 2>&1 | tail -5
+        
+        # 3. 强制校验目标平台
+        echo ""
+        echo "🔍 正在校验编译平台..."
+        TARGET_BOARD=$(grep '^CONFIG_TARGET_BOARD' .config | cut -d'"' -f2)
+        TARGET_SUB=$(grep '^CONFIG_TARGET_SUBTARGET' .config | cut -d'"' -f2)
+        TARGET_PROFILE=$(grep '^CONFIG_TARGET_PROFILE' .config | cut -d'"' -f2)
+        
+        echo "   📡 平台架构: $TARGET_BOARD / $TARGET_SUB"
+        echo "   📦 设备型号: $TARGET_PROFILE"
+        echo "   📊 已选插件: $(grep -c '^CONFIG_PACKAGE_.*=y' .config) 个"
+        
+        if [ "$TARGET_BOARD" != "mediatek" ]; then
+          echo "⚠️  警告：当前配置平台为 [$TARGET_BOARD]，非预期的 mediatek！"
+          echo "📋 请检查您的配置文件内容是否正确选择了 Target System 和 Subtarget。"
+        fi
+        
+        echo "✅ 配置应用与校验完成。"
 
     # 📁 步骤 5.5: 复制预配置文件到源码
     - name: 📁 复制预配置文件到源码
@@ -275,7 +302,6 @@ jobs:
     - name: 📥 下载软件包
       run: |
         cd ${{ env.WORK_DIR }}
-        make defconfig
         echo "🔄 执行 make download..."
         timeout 7200 make download -j8 V=s || {
           echo "⚠️ 下载超时，清理碎片后重试..."
@@ -545,11 +571,14 @@ jobs:
           ${{ env.OUTPUT_DIR }}/build.config
         body: |
           ### 📒 固件信息
+          
           | 项目 | 值 |
           |------|-----|
           | 💻 平台 | ${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }} |
           | 📂 源码 | [coolsnowwolf/lede](${{ env.REPO_URL }}) |
+          | 🌳 分支 | ${{ env.REPO_BRANCH }} |
           | 🕐 编译时间 | ${{ env.COMPILE_DATE }} |
+          | 🔤 汉化 | ${{ env.ENABLE_TRANSLATE }} |
           
           ### 🔧 默认配置
           - 🌐 管理地址: `192.168.1.1`
@@ -558,8 +587,9 @@ jobs:
           - 📶 WiFi: 前缀`${{ env.DEVICE == 'xdr6088' && 'TP-LINK_' || 'OpenWrt_' }}` + MAC_2G/5G
           
           ### ⚠️ 注意事项
-          1. 首次刷写: `sysupgrade -n firmware.bin`
-          2. 校验: `sha256sum -c sha256sums.txt`
+          1. 首次刷写建议: `sysupgrade -n firmware.bin`
+          2. 固件校验: `sha256sum -c sha256sums.txt`
+          3. 配置文件备份: `build.config`
 
     # 📝 步骤 12: 上传日志
     - name: 📝 上传编译日志
