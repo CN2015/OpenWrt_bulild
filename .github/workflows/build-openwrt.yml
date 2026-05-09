@@ -3,6 +3,7 @@
 # 功能：系统检测 + 依赖安装 + 源码管理 + 智能配置 + 冲突预检 + 汉化 + 编译重试
 # 适配：TP-LINK XDR6088 / REDMI AX6000 / 自定义机型
 # 核心优化：增强编译日志输出 / 分段显示进度 / 详细错误检查
+# 路径调整：配置文件使用 config/ 目录
 # ============================================================================
 
 name: Builder OpenWrt Multi-Device
@@ -140,10 +141,21 @@ jobs:
         echo "OPENWRT_PATH=${{ env.WORK_DIR }}" >> $GITHUB_ENV
         
         # 📋 提取设备目标（使用绝对路径安全读取）
-        CONFIG_PATH="${{ github.workspace }}/diy/configs/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config"
+        CONFIG_PATH="${{ github.workspace }}/config/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config"
+        echo "🔍 检查配置文件: $CONFIG_PATH"
+        
         if [ -f "$CONFIG_PATH" ]; then
+          echo "✅ 配置文件存在"
           echo "DEVICE_TARGET=$(grep '^CONFIG_TARGET_BOARD' "$CONFIG_PATH" | cut -d'"' -f2)" >> $GITHUB_ENV
           echo "DEVICE_SUBTARGET=$(grep '^CONFIG_TARGET_SUBTARGET' "$CONFIG_PATH" | cut -d'"' -f2)" >> $GITHUB_ENV
+          
+          # 🔍 显示配置摘要
+          echo "📋 配置摘要:"
+          grep '^CONFIG_TARGET' "$CONFIG_PATH" | head -10
+        else
+          echo "❌ 警告：配置文件不存在: $CONFIG_PATH"
+          echo "📋 检查 config 目录:"
+          ls -la "${{ github.workspace }}/config/" || true
         fi
 
     # 💾 步骤 5: 缓存工具链
