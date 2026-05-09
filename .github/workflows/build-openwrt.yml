@@ -155,7 +155,7 @@ jobs:
         mixkey: lede-${{ env.REPO_BRANCH }}-${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}
         prefix: ${{ env.WORK_DIR }}
 
-    # ⚙️ 新增步骤：强制应用配置并校验（解决编译平台错误问题）
+    # ⚙️ 强制应用配置并校验
     - name: ⚙️ Apply & Verify Configuration
       run: |
         cd ${{ env.WORK_DIR }}
