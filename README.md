@@ -5,6 +5,8 @@
 [![Build Status](https://github.com/USER/REPO/actions/workflows/build-openwrt.yml/badge.svg)](https://github.com/USER/REPO/actions)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-LEDE-orange)](https://github.com/coolsnowwolf/lede)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![OpenWrt]((https://img.shields.io/badge/OpenWrt-P3TERX-blueviolet.svg))](https://github.com/P3TERX/Actions-OpenWrt)
 
 ---
 
