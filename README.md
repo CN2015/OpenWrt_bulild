@@ -7,8 +7,8 @@
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-LEDE-orange)](https://github.com/coolsnowwolf/lede)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-P3TERX-blueviolet.svg)](https://github.com/P3TERX/Actions-OpenWrt)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![OpenWrt](https://img.shields.io/badge/OpenWrt-CN2015-blueviolet.svg)](https://github.com/CN2015/OpenWrt_bulild)
+[![License](https://img.shields.io/badge/license-MIT-bule.svg)](LICENSE)
+[![OpenWrt](https://img.shields.io/badge/OpenWrt-CN2015-red.svg)](https://github.com/CN2015/OpenWrt_bulild)
 
 ---
 
