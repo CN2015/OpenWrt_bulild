@@ -1,0 +1,51 @@
+# /etc/config/wireless - OpenWrt 无线配置模板
+# ⚠️  注意：优先使用 diy-lede.sh 动态生成，此为备用/修复方案
+
+config wifi-device 'radio0'
+    option type 'mac80211'
+    option path 'platform/soc/18000000.wifi'
+    option channel 'auto'
+    option band '2g'
+    option htmode 'HE20'
+    option country 'CN'
+    option cell_density '0'
+    option disabled '0'
+
+config wifi-iface 'default_radio0'
+    option device 'radio0'
+    option network 'lan'
+    option mode 'ap'
+    option ssid 'OpenWrt_2G'
+    option encryption 'psk2'
+    option key '1234567890'
+    option wps_pushbutton '0'
+    option isolate '0'
+    option disassoc_low_ack '1'
+
+config wifi-device 'radio1'
+    option type 'mac80211'
+    option path 'platform/soc/18000000.wifi+1'
+    option channel 'auto'
+    option band '5g'
+    option htmode 'HE80'
+    option country 'CN'
+    option cell_density '0'
+    option disabled '0'
+    # 📶 5G 优选信道（避免雷达信道）
+    list channels '36' '40' '44' '48' '149' '153' '157' '161'
+
+config wifi-iface 'default_radio1'
+    option device 'radio1'
+    option network 'lan'
+    option mode 'ap'
+    option ssid 'OpenWrt_5G'
+    option encryption 'psk2'
+    option key '1234567890'
+    option wps_pushbutton '0'
+    option isolate '0'
+    option disassoc_low_ack '1'
+    # 🚀 启用 802.11k/v/r 快速漫游（需客户端支持）
+    option ieee80211k '1'
+    option ieee80211v '1'
+    option ieee80211r '0'  # 部分客户端兼容性问题，默认关闭
+    option mobility_domain 'a1b2'
