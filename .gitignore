@@ -1,0 +1,68 @@
+# ============================================================================
+# OpenWrt 自动化编译系统 - Git 忽略规则
+# 目标: 避免提交编译产物/临时文件/敏感配置，保留可重现的构建环境
+# ============================================================================
+
+# 🗑️ 编译产物（大文件 + 可再生）
+/bin/
+/build_dir/
+/staging_dir/
+/tmp/
+/dl/
+*.ipk
+*.bin
+*.img.gz
+sha256sums
+packages.manifest
+version.buildinfo
+
+# ⚙️ 本地配置（避免覆盖他人配置）
+.config
+.config.old
+*.config
+.config-*
+
+# 📝 日志文件（调试用，不提交）
+*.log
+logs/
+translate_history.log
+build.log
+download.log
+
+# 🔧 临时/备份文件
+*.bak
+*.swp
+*.swo
+*~
+\#*\#
+.*.swp
+
+# 🐍 Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 💻 系统文件
+.DS_Store
+Thumbs.db
+*.orig
+*.rej
+
+# 🔐 敏感信息（切勿提交！）
+# secrets/
+# *.pem
+# *.key
+# .env
+
+# 🎯 例外：保留关键配置文件
+!.github/workflows/
+!diy/
+!diy/configs/*.config
+!diy/files/**
+!diy/scripts/*.sh
+!README.md
+!LICENSE
+!.gitignore
+
+# 📦 允许提交示例配置（供参考）
+!diy/configs/xdr6088-mini.config.example
