@@ -1,5 +1,5 @@
 # ============================================================================
-# OpenWrt LEDE 自动化编译系统 v3.8.16-GA (GitHub Actions 增强版)
+# OpenWrt LEDE 自动化编译系统 v3.8.16-GA (修复版)
 # 功能：系统检测 + 依赖安装 + 源码管理 + 智能配置 + 冲突预检 + 汉化 + 编译重试
 # 适配：TP-LINK XDR6088 / REDMI AX6000 / 自定义机型
 # ============================================================================
@@ -45,10 +45,9 @@ env:
   REPO_URL: https://github.com/coolsnowwolf/lede.git
   REPO_BRANCH: master
   
-  # 🎯 设备配置（支持工作流输入覆盖）
+  # 🎯 设备配置
   DEVICE: ${{ github.event.inputs.device || 'xdr6088' }}
   CONFIG_VERSION: ${{ github.event.inputs.config_version || 'full' }}
-  CONFIG_FILE: diy/configs/${{ github.event.inputs.device || 'xdr6088' }}-${{ github.event.inputs.config_version || 'full' }}.config
   
   # 🔧 功能开关
   ENABLE_TRANSLATE: ${{ github.event.inputs.enable_translate || 'true' }}
@@ -56,7 +55,6 @@ env:
   SKIP_FEEDS_MODIFY: ${{ github.event.inputs.skip_feeds_modify || 'false' }}
   
   # 📶 WiFi 配置
-  WIFI_PREFIX: ${{ github.event.inputs.device == 'xdr6088' && 'TP-LINK_' || (github.event.inputs.device == 'ax6000' && 'Redmi_' || 'OpenWrt_') }}
   WIFI_PASSWORD: "1234567890"
   
   # 🏷️ 输出配置
@@ -69,41 +67,29 @@ env:
   DIY_SCRIPT: diy/diy-lede.sh
   WORK_DIR: ${{ github.workspace }}/openwrt
   OUTPUT_DIR: ${{ github.workspace }}/output
-  FILES_DIR: ${{ github.workspace }}/diy/files
-  SCRIPTS_DIR: ${{ github.workspace }}/diy/scripts
 
 jobs:
   Build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 360  # ⏱️ 6小时超时保护
+    timeout-minutes: 360
     
     steps:
-    # 🔍 步骤 0: 环境检测 + 性能报告
+    # 🔍 步骤 0: 环境检测
     - name: 🔍 系统环境检测
       run: |
-        echo "🖥️  GitHub Actions 服务器信息"
+        echo "🖥️ GitHub Actions 服务器信息"
         echo "• CPU: $(cat /proc/cpuinfo | grep 'model name' | head -1 | cut -d: -f2 | xargs)"
         echo "• 核心: $(nproc) | 内存: $(free -h | grep Mem | awk '{print $2}')"
         echo "• 磁盘: $(df -h / | tail -1 | awk '{print $2" (可用 "$4")"}')"
-        echo ""
-        echo "📋 编译参数:"
-        echo "  • 机型: ${{ env.DEVICE }}"
-        echo "  • 配置: ${{ env.CONFIG_VERSION }}"
-        echo "  • 汉化: ${{ env.ENABLE_TRANSLATE }}"
-        echo "  • 内核同步: ${{ env.ENABLE_KERNEL_SYNC }}"
+        echo "📋 编译参数: 机型=${{ env.DEVICE }} 配置=${{ env.CONFIG_VERSION }}"
         df -h
 
-    # 🛠️ 步骤 1: 初始化编译环境（含新手模式依赖安装）
+    # 🛠️ 步骤 1: 初始化编译环境
     - name: 🛠️ 初始化编译环境
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        # 🧹 清理空间
         sudo -E apt -yqq purge firefox ghc* zstd clang-12 llvm-12* || true
-        sudo -E apt -yqq autoremove --purge
-        sudo -E apt -yqq autoclean
-        
-        # 📦 安装基础依赖
         sudo -E apt -yqq update
         sudo -E apt -yqq install -y \
           ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
@@ -115,19 +101,12 @@ jobs:
           python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig \
           texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev dos2unix \
           libfuse-dev python3-netifaces
-        
-        # 🌐 使用 immortalwrt 初始化脚本补充依赖
         sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)' || true
-        
-        # 🔄 配置时区 + Git
         sudo timedatectl set-timezone "$TZ"
         git config --global user.name 'GitHub Actions'
         git config --global user.email 'actions@github.com'
-        
-        # 💾 ccache 配置（加速二次编译）
         export PATH="/usr/lib/ccache:$PATH"
         echo 'export PATH="/usr/lib/ccache:$PATH"' >> ~/.bashrc
-        
         df -h /
 
     # 💾 步骤 2: 最大化磁盘空间
@@ -144,25 +123,21 @@ jobs:
       with:
         fetch-depth: 0
 
-    # 📥 步骤 4: 克隆 + 更新 LEDE 源码（含冲突处理）
+    # 📥 步骤 4: 克隆 LEDE 源码
     - name: 📥 克隆 LEDE 源码
       run: |
         echo "📦 克隆源码: ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }}"
         git clone --single-branch ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }} ${{ env.WORK_DIR }}
         cd ${{ env.WORK_DIR }}
-        
-        # 🏷️ 记录编译信息
         echo "COMPILE_DATE=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
         echo "FIRMWARE_TAG=$(date +"%Y%m%d")" >> $GITHUB_ENV
         echo "OPENWRT_PATH=${{ env.WORK_DIR }}" >> $GITHUB_ENV
-        
-        # 📋 提取设备目标
-        if [ -f "${{ env.CONFIG_FILE }}" ]; then
-          echo "DEVICE_TARGET=$(grep '^CONFIG_TARGET_BOARD' ${{ env.CONFIG_FILE }} | cut -d'"' -f2)" >> $GITHUB_ENV
-          echo "DEVICE_SUBTARGET=$(grep '^CONFIG_TARGET_SUBTARGET' ${{ env.CONFIG_FILE }} | cut -d'"' -f2)" >> $GITHUB_ENV
+        if [ -f "diy/configs/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config" ]; then
+          echo "DEVICE_TARGET=$(grep '^CONFIG_TARGET_BOARD' diy/configs/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config | cut -d'"' -f2)" >> $GITHUB_ENV
+          echo "DEVICE_SUBTARGET=$(grep '^CONFIG_TARGET_SUBTARGET' diy/configs/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config | cut -d'"' -f2)" >> $GITHUB_ENV
         fi
 
-    # 💾 步骤 5: 缓存工具链（条件启用）
+    # 💾 步骤 5: 缓存工具链
     - name: 💾 缓存工具链
       if: env.CACHE_TOOLCHAIN == 'true'
       uses: HiGarfield/cachewrtbuild@main
@@ -171,149 +146,136 @@ jobs:
         mixkey: lede-${{ env.REPO_BRANCH }}-${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}
         prefix: ${{ env.WORK_DIR }}
 
-    # 📁 步骤 5.5: 复制预配置文件到源码（🔴 新增：方案 B 核心）
+    # 📁 步骤 5.5: 复制预配置文件（✅ 修复版：简化逻辑）
     - name: 📁 复制预配置文件到源码
       run: |
-        echo "📁 处理预配置文件 (diy/files)..."
+        echo "📁 处理预配置文件..."
         
-        if [ -d "${{ env.FILES_DIR }}" ]; then
-          info "✓ 找到预配置目录: ${{ env.FILES_DIR }}"
+        # 📋 定义辅助函数（先定义后使用）
+        log_info() { echo "[✓] $1"; }
+        log_warn() { echo "[!] $1"; }
+        
+        FILES_SRC="${{ github.workspace }}/diy/files"
+        FILES_DST="${{ env.WORK_DIR }}/package/base-files/files"
+        
+        if [ -d "$FILES_SRC" ]; then
+          log_info "找到预配置目录: $FILES_SRC"
           
-          # 📋 创建目标目录
-          mkdir -p "${{ env.WORK_DIR }}/package/base-files/files"
+          # 🔄 复制文件
+          mkdir -p "$FILES_DST"
+          cp -rf "$FILES_SRC"/. "$FILES_DST/" 2>/dev/null || true
+          log_info "预配置文件已复制"
           
-          # 🔄 合并复制预配置文件（保留源码原有文件）
-          echo "🔄 复制 files/ → package/base-files/files/"
-          cp -rf "${{ env.FILES_DIR }}"/. "${{ env.WORK_DIR }}/package/base-files/files/" 2>/dev/null || true
+          # 🔐 设置执行权限
+          find "$FILES_DST" -type f -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
           
-          # 🔐 设置脚本执行权限
-          echo "🔐 设置脚本执行权限..."
-          find "${{ env.WORK_DIR }}/package/base-files/files" -type f -name "*.sh" -exec chmod +x {} \;
-          
-          # 🔄 注册 fix-wifi.sh 首次启动执行
-          FIX_WIFI="${{ env.WORK_DIR }}/package/base-files/files/usr/bin/fix-wifi.sh"
+          # 🔄 注册 fix-wifi.sh (简化版)
+          FIX_WIFI="$FILES_DST/usr/bin/fix-wifi.sh"
           if [ -f "$FIX_WIFI" ]; then
-            echo "🔄 注册 fix-wifi.sh 到首次启动..."
-            RC_LOCAL="${{ env.WORK_DIR }}/package/base-files/files/etc/rc.local"
-            
-            if [ -f "$RC_LOCAL" ]; then
-              # 在 exit 0 之前插入执行命令（后台运行避免阻塞启动）
-              if ! grep -q "fix-wifi.sh" "$RC_LOCAL"; then
-                sed -i '/^exit 0/i\/usr/bin/fix-wifi.sh \&' "$RC_LOCAL"
-                echo "✓ 已添加到现有 rc.local"
-              fi
-            else
-              # 创建最小 rc.local
-              cat > "$RC_LOCAL" << 'RCLOCAL'
-#!/bin/sh
-# OpenWrt 首次启动配置
-# 执行 WiFi 修复脚本（如果未配置过）
-[ -f /etc/.wifi_customized ] || /usr/bin/fix-wifi.sh &
-exit 0
-RCLOCAL
+            RC_LOCAL="$FILES_DST/etc/rc.local"
+            if [ -f "$RC_LOCAL" ] && ! grep -q "fix-wifi" "$RC_LOCAL"; then
+              # 在 exit 0 前插入（使用简单 sed）
+              sed -i '/^exit 0/i\/usr/bin/fix-wifi.sh \&' "$RC_LOCAL"
+              log_info "已注册 fix-wifi.sh 到 rc.local"
+            elif [ ! -f "$RC_LOCAL" ]; then
+              printf '#!/bin/sh\n[ -f /etc/.wifi_customized ] || /usr/bin/fix-wifi.sh &\nexit 0\n' > "$RC_LOCAL"
               chmod +x "$RC_LOCAL"
-              echo "✓ 已创建新 rc.local"
+              log_info "已创建 rc.local 并注册 fix-wifi.sh"
             fi
           fi
           
-          # 🎨 处理 Banner 模板变量替换
-          BANNER_SRC="${{ env.FILES_DIR }}/etc/banner"
-          BANNER_DST="${{ env.WORK_DIR }}/package/base-files/files/etc/banner"
+          # 🎨 处理 Banner (简化变量替换)
+          BANNER_SRC="$FILES_SRC/etc/banner"
+          BANNER_DST="$FILES_DST/etc/banner"
           if [ -f "$BANNER_SRC" ]; then
-            echo "🎨 生成 Banner（替换模板变量）..."
-            sed -e "s|{{DEVICE_NAME}}|${{ env.DEVICE == 'xdr6088' && 'TP-LINK XDR6088' || (env.DEVICE == 'ax6000' && 'Redmi AX6000' || 'OpenWrt')}}|g" \
+            # 简单替换几个关键变量
+            DEVICE_NAME="OpenWrt"
+            [ "${{ env.DEVICE }}" = "xdr6088" ] && DEVICE_NAME="TP-LINK XDR6088"
+            [ "${{ env.DEVICE }}" = "ax6000" ] && DEVICE_NAME="Redmi AX6000"
+            
+            WIFI_PREFIX="OpenWrt_"
+            [ "${{ env.DEVICE }}" = "xdr6088" ] && WIFI_PREFIX="TP-LINK_"
+            [ "${{ env.DEVICE }}" = "ax6000" ] && WIFI_PREFIX="Redmi_"
+            
+            sed -e "s|{{DEVICE_NAME}}|$DEVICE_NAME|g" \
                 -e "s|{{BUILD_DATE}}|$(date '+%Y-%m-%d')|g" \
-                -e "s|{{WIFI_PREFIX}}|${{ env.WIFI_PREFIX }}|g" \
+                -e "s|{{WIFI_PREFIX}}|$WIFI_PREFIX|g" \
                 -e "s|{{REPO_URL}}|https://github.com/${{ github.repository }}|g" \
                 "$BANNER_SRC" > "$BANNER_DST"
-            echo "✓ Banner 已生成: $BANNER_DST"
+            log_info "Banner 已生成"
           fi
-          
-          echo "✅ 预配置文件处理完成"
         else
-          echo "⚠️  diy/files 目录不存在，跳过预配置"
+          log_warn "diy/files 目录不存在，跳过预配置"
         fi
-        
-        # 📋 辅助函数（用于日志输出）
-        info() { echo -e "\033[0;32m[✓]\033[0m $1"; }
-        warn() { echo -e "\033[1;33m[!]\033[0m $1"; }
 
-    # 🔧 步骤 6: 执行自定义配置脚本（核心：整合所有智能配置）
+    # 🔧 步骤 6: 执行自定义配置脚本
     - name: 🔧 执行自定义配置脚本
       run: |
         chmod +x ${{ env.DIY_SCRIPT }}
         cd ${{ env.WORK_DIR }}
         
-        # 📋 传递环境变量给脚本
+        # 📋 传递环境变量
         export DEVICE="${{ env.DEVICE }}"
-        export DEVICE_NAME="${{ env.DEVICE == 'xdr6088' && 'TP-LINK XDR6088' || (env.DEVICE == 'ax6000' && 'Redmi AX6000' || 'OpenWrt') }}"
-        export WIFI_PREFIX="${{ env.WIFI_PREFIX }}"
-        export WIFI_PASSWORD="${{ env.WIFI_PASSWORD }}"
+        export CONFIG_VERSION="${{ env.CONFIG_VERSION }}"
         export ENABLE_TRANSLATE="${{ env.ENABLE_TRANSLATE }}"
         export ENABLE_KERNEL_SYNC="${{ env.ENABLE_KERNEL_SYNC }}"
         export SKIP_FEEDS_MODIFY="${{ env.SKIP_FEEDS_MODIFY }}"
-        export CONFIG_VERSION="${{ env.CONFIG_VERSION }}"
+        export WIFI_PASSWORD="${{ env.WIFI_PASSWORD }}"
         export GITHUB_WORKSPACE="${{ github.workspace }}"
         export GITHUB_REPOSITORY="${{ github.repository }}"
-        export SCRIPTS_DIR="${{ env.SCRIPTS_DIR }}"
-        export FILES_DIR="${{ env.FILES_DIR }}"
         
-        # 🚀 执行整合脚本
+        # 📶 根据机型设置 WiFi 前缀（在脚本中处理，避免 YML 复杂表达式）
+        export WIFI_PREFIX="OpenWrt_"
+        [ "$DEVICE" = "xdr6088" ] && export WIFI_PREFIX="TP-LINK_"
+        [ "$DEVICE" = "ax6000" ] && export WIFI_PREFIX="Redmi_"
+        
+        # 🏷️ 设备名称
+        export DEVICE_NAME="OpenWrt"
+        [ "$DEVICE" = "xdr6088" ] && export DEVICE_NAME="TP-LINK XDR6088"
+        [ "$DEVICE" = "ax6000" ] && export DEVICE_NAME="Redmi AX6000"
+        
+        # 🚀 执行脚本
         ${{ env.DIY_SCRIPT }}
         
-        # ✅ 验证配置
+        # ✅ 验证
         [ -f ".config" ] && echo "📋 已选插件: $(grep -c '^CONFIG_PACKAGE_.*=y' .config) 个"
 
-    # 📥 步骤 7: 下载软件包（含失败重试）
+    # 📥 步骤 7: 下载软件包
     - name: 📥 下载软件包
       run: |
         cd ${{ env.WORK_DIR }}
         make defconfig
-        
-        echo "🔄 执行 make download (超时: 7200s)..."
+        echo "🔄 执行 make download..."
         timeout 7200 make download -j8 V=s || {
-          echo "⚠️  下载超时或部分失败，尝试清理后重试..."
+          echo "⚠️ 下载超时，重试..."
           find dl -size -1024c -exec rm -f {} \;
           make download -j4 V=s
         }
-        
-        # 🧹 清理碎片文件
         find dl -size -1024c -exec rm -f {} \; 2>/dev/null || true
 
-    # 🏗️ 步骤 8: 编译固件（含智能重试逻辑）
+    # 🏗️ 步骤 8: 编译固件
     - name: 🏗️ 编译固件
       id: compile
       run: |
         cd ${{ env.WORK_DIR }}
-        LOG_FILE="${{ env.OUTPUT_DIR }}/build.log"
         mkdir -p "${{ env.OUTPUT_DIR }}"
+        LOG_FILE="${{ env.OUTPUT_DIR }}/build.log"
         
         echo "🚀 开始编译 (线程: $(nproc))..."
         START_TIME=$(date +%s)
         
-        # 🔨 主编译命令 + 失败自动解析重试
         make -j$(nproc) V=s 2>&1 | tee "$LOG_FILE"
         MAKE_EXIT=${PIPESTATUS[0]}
         
         if [ "$MAKE_EXIT" -ne 0 ]; then
-          echo "⚠️  编译失败 (退出码: $MAKE_EXIT)，尝试智能修复..."
-          
-          # 🔍 检测 Error 255 (opkg 冲突)
-          if grep -q "Error 255\|check_data_file_clashes\|opkg_install_cmd.*Cannot install" "$LOG_FILE"; then
-            echo "🔧 检测到包冲突，尝试自动解决..."
-            
-            # 提取冲突包名
+          echo "⚠️ 编译失败，尝试修复..."
+          if grep -q "Error 255\|check_data_file_clashes" "$LOG_FILE"; then
             CONFLICT_PKG=$(grep -oP "check_data_file_clashes: Package \K\S+" "$LOG_FILE" | head -1)
             [ -z "$CONFLICT_PKG" ] && CONFLICT_PKG=$(grep -oP "Cannot install package \K\S+" "$LOG_FILE" | head -1)
-            
             if [ -n "$CONFLICT_PKG" ]; then
               echo "📦 冲突包: $CONFLICT_PKG"
-              # 禁用冲突包
               sed -i "s/^CONFIG_PACKAGE_${CONFLICT_PKG}=[ym]/# CONFIG_PACKAGE_${CONFLICT_PKG} is not set/" .config
-              # 同时禁用关联 LuCI
               sed -i "s/^CONFIG_PACKAGE_luci-app-${CONFLICT_PKG}=[ym]/# CONFIG_PACKAGE_luci-app-${CONFLICT_PKG} is not set/" .config 2>/dev/null || true
-              
-              # 🔄 清理缓存 + 重试打包阶段
               make defconfig >/dev/null 2>&1
               make package/install -j1 V=s 2>&1 | tee -a "$LOG_FILE"
             fi
@@ -322,43 +284,36 @@ RCLOCAL
         
         END_TIME=$(date +%s)
         DURATION=$((END_TIME - START_TIME))
-        echo "⏱️  编译耗时: $((DURATION/3600))h $((DURATION%3600/60))m $((DURATION%60))s"
+        echo "⏱️ 编译耗时: $((DURATION/3600))h $((DURATION%3600/60))m $((DURATION%60))s"
         
         if [ ${PIPESTATUS[0]} -eq 0 ] || [ -f "bin/targets/*/sysupgrade.bin" ]; then
           echo "status=success" >> $GITHUB_OUTPUT
           echo "✅ 编译成功"
         else
-          echo "❌ 编译失败，请查看日志"
+          echo "❌ 编译失败"
           exit 1
         fi
 
-    # 🗂️ 步骤 9: 整理固件文件
+    # 🗂️ 步骤 9: 整理固件
     - name: 🗂️ 整理固件文件
       if: steps.compile.outputs.status == 'success'
       run: |
         cd ${{ env.WORK_DIR }}/bin/targets/*/*/
         mkdir -p ${{ env.OUTPUT_DIR }}
-        
-        # 🔧 重命名固件
         FIRMWARE=$(ls *sysupgrade.bin 2>/dev/null | head -1)
         if [ -n "$FIRMWARE" ]; then
           NEW_NAME="OpenWrt-${{ env.DEVICE }}-$(date +"%Y%m%d")-$(echo $FIRMWARE | grep -oP 'sysupgrade\.\K\w+').bin"
           mv "$FIRMWARE" "${{ env.OUTPUT_DIR }}/$NEW_NAME"
           echo "FIRMWARE_NAME=$NEW_NAME" >> $GITHUB_ENV
         fi
-        
-        # 📋 生成校验 + 备份配置
         sha256sum "${{ env.OUTPUT_DIR }}"/*.bin > "${{ env.OUTPUT_DIR }}/sha256sums.txt"
         cp ${{ env.WORK_DIR }}/.config "${{ env.OUTPUT_DIR }}/build.config"
-        
-        # 📦 打包 IPK
         mkdir -p "${{ env.OUTPUT_DIR }}/packages"
         find ${{ env.WORK_DIR }}/bin/packages -name "*.ipk" -exec cp {} "${{ env.OUTPUT_DIR }}/packages/" \; 2>/dev/null || true
         tar -czf "${{ env.OUTPUT_DIR }}/packages.tar.gz" -C "${{ env.OUTPUT_DIR }}" packages
-        
         echo "FIRMWARE_PATH=${{ env.OUTPUT_DIR }}" >> $GITHUB_ENV
 
-    # 📤 步骤 10: 上传 Artifact（测试用）
+    # 📤 步骤 10: 上传 Artifact
     - name: 📤 上传固件到 Artifact
       if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE != 'true'
       uses: actions/upload-artifact@v4
@@ -367,7 +322,7 @@ RCLOCAL
         path: ${{ env.OUTPUT_DIR }}/*
         retention-days: 7
 
-    # 🚀 步骤 11: 发布到 GitHub Release
+    # 🚀 步骤 11: 发布 Release
     - name: 🚀 发布固件到 Release
       if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE == 'true'
       uses: ncipollo/release-action@v1
@@ -381,27 +336,23 @@ RCLOCAL
           ${{ env.OUTPUT_DIR }}/build.config
         body: |
           ### 📒 固件信息
-          
           | 项目 | 值 |
           |------|-----|
           | 💻 平台 | ${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }} |
           | 📂 源码 | [coolsnowwolf/lede](${{ env.REPO_URL }}) |
-          | 🌳 分支 | ${{ env.REPO_BRANCH }} |
           | 🕐 编译时间 | ${{ env.COMPILE_DATE }} |
-          | 🔤 汉化 | ${{ env.ENABLE_TRANSLATE }} |
           
           ### 🔧 默认配置
           - 🌐 管理地址: `192.168.1.1`
           - 👤 用户名: `root`
           - 🔒 密码: **首次登录强制修改**
-          - 📶 WiFi: `${{ env.WIFI_PREFIX }}XXXX_2G/5G` | 密码: `${{ env.WIFI_PASSWORD }}`
+          - 📶 WiFi: 前缀`${{ env.DEVICE == 'xdr6088' && 'TP-LINK_' || 'OpenWrt_' }}` + MAC_2G/5G
           
           ### ⚠️ 注意事项
-          1. 首次刷写建议: `sysupgrade -n /path/to/firmware.bin`
-          2. 固件校验: `sha256sum -c sha256sums.txt`
-          3. 配置文件备份: `build.config`
+          1. 首次刷写: `sysupgrade -n firmware.bin`
+          2. 校验: `sha256sum -c sha256sums.txt`
 
-    # 📝 步骤 12: 上传编译日志（便于排查）
+    # 📝 步骤 12: 上传日志
     - name: 📝 上传编译日志
       if: always()
       uses: actions/upload-artifact@v4
