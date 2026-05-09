@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-LEDE-orange)](https://github.com/coolsnowwolf/lede)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![OpenWrt]((https://img.shields.io/badge/OpenWrt-P3TERX-blueviolet.svg)](https://github.com/P3TERX/Actions-OpenWrt)
+[![OpenWrt](https://img.shields.io/badge/OpenWrt-P3TERX-blueviolet.svg)](https://github.com/P3TERX/Actions-OpenWrt)
 
 ---
 
