@@ -69,6 +69,8 @@ env:
   DIY_SCRIPT: diy/diy-lede.sh
   WORK_DIR: ${{ github.workspace }}/openwrt
   OUTPUT_DIR: ${{ github.workspace }}/output
+  FILES_DIR: ${{ github.workspace }}/diy/files
+  SCRIPTS_DIR: ${{ github.workspace }}/diy/scripts
 
 jobs:
   Build:
@@ -169,7 +171,74 @@ jobs:
         mixkey: lede-${{ env.REPO_BRANCH }}-${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}
         prefix: ${{ env.WORK_DIR }}
 
-    # 🔧 步骤 6: 执行自定义脚本（核心：整合所有智能配置）
+    # 📁 步骤 5.5: 复制预配置文件到源码（🔴 新增：方案 B 核心）
+    - name: 📁 复制预配置文件到源码
+      run: |
+        echo "📁 处理预配置文件 (diy/files)..."
+        
+        if [ -d "${{ env.FILES_DIR }}" ]; then
+          info "✓ 找到预配置目录: ${{ env.FILES_DIR }}"
+          
+          # 📋 创建目标目录
+          mkdir -p "${{ env.WORK_DIR }}/package/base-files/files"
+          
+          # 🔄 合并复制预配置文件（保留源码原有文件）
+          echo "🔄 复制 files/ → package/base-files/files/"
+          cp -rf "${{ env.FILES_DIR }}"/. "${{ env.WORK_DIR }}/package/base-files/files/" 2>/dev/null || true
+          
+          # 🔐 设置脚本执行权限
+          echo "🔐 设置脚本执行权限..."
+          find "${{ env.WORK_DIR }}/package/base-files/files" -type f -name "*.sh" -exec chmod +x {} \;
+          
+          # 🔄 注册 fix-wifi.sh 首次启动执行
+          FIX_WIFI="${{ env.WORK_DIR }}/package/base-files/files/usr/bin/fix-wifi.sh"
+          if [ -f "$FIX_WIFI" ]; then
+            echo "🔄 注册 fix-wifi.sh 到首次启动..."
+            RC_LOCAL="${{ env.WORK_DIR }}/package/base-files/files/etc/rc.local"
+            
+            if [ -f "$RC_LOCAL" ]; then
+              # 在 exit 0 之前插入执行命令（后台运行避免阻塞启动）
+              if ! grep -q "fix-wifi.sh" "$RC_LOCAL"; then
+                sed -i '/^exit 0/i\/usr/bin/fix-wifi.sh \&' "$RC_LOCAL"
+                echo "✓ 已添加到现有 rc.local"
+              fi
+            else
+              # 创建最小 rc.local
+              cat > "$RC_LOCAL" << 'RCLOCAL'
+#!/bin/sh
+# OpenWrt 首次启动配置
+# 执行 WiFi 修复脚本（如果未配置过）
+[ -f /etc/.wifi_customized ] || /usr/bin/fix-wifi.sh &
+exit 0
+RCLOCAL
+              chmod +x "$RC_LOCAL"
+              echo "✓ 已创建新 rc.local"
+            fi
+          fi
+          
+          # 🎨 处理 Banner 模板变量替换
+          BANNER_SRC="${{ env.FILES_DIR }}/etc/banner"
+          BANNER_DST="${{ env.WORK_DIR }}/package/base-files/files/etc/banner"
+          if [ -f "$BANNER_SRC" ]; then
+            echo "🎨 生成 Banner（替换模板变量）..."
+            sed -e "s|{{DEVICE_NAME}}|${{ env.DEVICE == 'xdr6088' && 'TP-LINK XDR6088' || (env.DEVICE == 'ax6000' && 'Redmi AX6000' || 'OpenWrt')}}|g" \
+                -e "s|{{BUILD_DATE}}|$(date '+%Y-%m-%d')|g" \
+                -e "s|{{WIFI_PREFIX}}|${{ env.WIFI_PREFIX }}|g" \
+                -e "s|{{REPO_URL}}|https://github.com/${{ github.repository }}|g" \
+                "$BANNER_SRC" > "$BANNER_DST"
+            echo "✓ Banner 已生成: $BANNER_DST"
+          fi
+          
+          echo "✅ 预配置文件处理完成"
+        else
+          echo "⚠️  diy/files 目录不存在，跳过预配置"
+        fi
+        
+        # 📋 辅助函数（用于日志输出）
+        info() { echo -e "\033[0;32m[✓]\033[0m $1"; }
+        warn() { echo -e "\033[1;33m[!]\033[0m $1"; }
+
+    # 🔧 步骤 6: 执行自定义配置脚本（核心：整合所有智能配置）
     - name: 🔧 执行自定义配置脚本
       run: |
         chmod +x ${{ env.DIY_SCRIPT }}
@@ -177,12 +246,17 @@ jobs:
         
         # 📋 传递环境变量给脚本
         export DEVICE="${{ env.DEVICE }}"
+        export DEVICE_NAME="${{ env.DEVICE == 'xdr6088' && 'TP-LINK XDR6088' || (env.DEVICE == 'ax6000' && 'Redmi AX6000' || 'OpenWrt') }}"
         export WIFI_PREFIX="${{ env.WIFI_PREFIX }}"
         export WIFI_PASSWORD="${{ env.WIFI_PASSWORD }}"
         export ENABLE_TRANSLATE="${{ env.ENABLE_TRANSLATE }}"
         export ENABLE_KERNEL_SYNC="${{ env.ENABLE_KERNEL_SYNC }}"
         export SKIP_FEEDS_MODIFY="${{ env.SKIP_FEEDS_MODIFY }}"
         export CONFIG_VERSION="${{ env.CONFIG_VERSION }}"
+        export GITHUB_WORKSPACE="${{ github.workspace }}"
+        export GITHUB_REPOSITORY="${{ github.repository }}"
+        export SCRIPTS_DIR="${{ env.SCRIPTS_DIR }}"
+        export FILES_DIR="${{ env.FILES_DIR }}"
         
         # 🚀 执行整合脚本
         ${{ env.DIY_SCRIPT }}
