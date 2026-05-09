@@ -1,12 +1,14 @@
 #!/bin/bash
 # ============================================================================
-# OpenWrt LEDE 自定义配置脚本 (GitHub Actions 专用)
+# OpenWrt LEDE 自定义配置脚本 (GitHub Actions 专用) - 方案 B 版
 # 功能：源码配置 + 插件源 + 主机名 + WiFi + Banner + 汉化 + 冲突预检
+# 特点：加载辅助脚本库 + 使用独立函数模块
 # ============================================================================
 set -e
 
-# 📋 接收环境变量
+# 📋 接收环境变量（由 YML 传递）
 DEVICE="${DEVICE:-xdr6088}"
+DEVICE_NAME="${DEVICE_NAME:-OpenWrt}"
 WIFI_PREFIX="${WIFI_PREFIX:-OpenWrt_}"
 WIFI_PASSWORD="${WIFI_PASSWORD:-1234567890}"
 ENABLE_TRANSLATE="${ENABLE_TRANSLATE:-true}"
@@ -15,14 +17,48 @@ SKIP_FEEDS_MODIFY="${SKIP_FEEDS_MODIFY:-false}"
 CONFIG_VERSION="${CONFIG_VERSION:-full}"
 
 OPENWRT_PATH="${OPENWRT_PATH:-$PWD}"
+GITHUB_WORKSPACE="${GITHUB_WORKSPACE:-$(cd "$(dirname "$0")/.."; pwd)}"
+SCRIPTS_DIR="${SCRIPTS_DIR:-$GITHUB_WORKSPACE/diy/scripts}"
+FILES_DIR="${FILES_DIR:-$GITHUB_WORKSPACE/diy/files}"
+
 cd "$OPENWRT_PATH"
 
+# 🎨 颜色输出函数
 info() { echo -e "\033[0;32m[✓]\033[0m $1"; }
 warn() { echo -e "\033[1;33m[!]\033[0m $1"; }
 error() { echo -e "\033[0;31m[✗]\033[0m $1"; }
 
 # ============================================================================
-# 🔧 步骤 1: 配置自定义 feeds（安全追加）
+# 🔧 模块 0: 加载辅助脚本库（方案 B 核心）
+# ============================================================================
+load_helper_scripts() {
+    info "🔧 加载辅助脚本库..."
+    
+    # 📋 汉化映射表
+    if [ -f "$SCRIPTS_DIR/translate-map.sh" ]; then
+        source "$SCRIPTS_DIR/translate-map.sh"
+        info "  ✓ 加载: translate-map.sh"
+    else
+        warn "  ⚠️  未找到 translate-map.sh，使用默认汉化逻辑"
+    fi
+    
+    # ⚔️ 冲突解决器
+    if [ -f "$SCRIPTS_DIR/conflict-resolver.sh" ]; then
+        source "$SCRIPTS_DIR/conflict-resolver.sh"
+        info "  ✓ 加载: conflict-resolver.sh"
+    else
+        warn "  ⚠️  未找到 conflict-resolver.sh，使用内联冲突处理"
+    fi
+    
+    # 📶 WiFi 生成器
+    if [ -f "$SCRIPTS_DIR/wifi-generator.sh" ]; then
+        # 不直接 source，按需调用函数
+        info "  ✓ 加载: wifi-generator.sh (按需调用)"
+    fi
+}
+
+# ============================================================================
+# 🔧 模块 1: 配置自定义 feeds（安全追加）
 # ============================================================================
 configure_feeds() {
     [ "$SKIP_FEEDS_MODIFY" = "true" ] && { info "⏭️  跳过 feeds 配置"; return 0; }
@@ -58,7 +94,7 @@ configure_feeds() {
 }
 
 # ============================================================================
-# 🔧 步骤 2: 内核版本同步（可选）
+# 🔧 模块 2: 内核版本同步（可选）
 # ============================================================================
 sync_kernel() {
     [ "$ENABLE_KERNEL_SYNC" != "true" ] && { info "⏭️  跳过内核同步"; return 0; }
@@ -74,7 +110,7 @@ sync_kernel() {
 }
 
 # ============================================================================
-# 🔧 步骤 3: 应用基础配置（主机名 + 账号）
+# 🔧 模块 3: 应用基础配置（主机名 + 账号）
 # ============================================================================
 apply_base_config() {
     info "🔧 应用基础配置..."
@@ -93,19 +129,16 @@ apply_base_config() {
 }
 
 # ============================================================================
-# 🎨 步骤 4: 生成自定义 Banner
+# 🎨 模块 4: 生成自定义 Banner（已由 YML 预处理，此为备用）
 # ============================================================================
-generate_banner() {
-    info "🎨 生成自定义 Banner..."
+generate_banner_fallback() {
+    # 如果 YML 步骤已处理，则跳过
+    [ -f "package/base-files/files/etc/banner" ] && grep -q "TP-LINK\|Redmi\|OpenWrt" "package/base-files/files/etc/banner" 2>/dev/null && {
+        info "⏭️  Banner 已由预配置步骤生成，跳过"
+        return 0
+    }
     
-    # 📋 机型映射
-    declare -A DEVICE_INFO=(
-        ["xdr6088"]="TP-LINK XDR6088|192.168.1.1|CN2014"
-        ["ax6000"]="Redmi AX6000|192.168.1.1|CN2014"
-        ["custom"]="OpenWrt|192.168.1.1|Custom"
-    )
-    
-    IFS='|' read -r dev_name mgmt_ip author <<< "${DEVICE_INFO[$DEVICE]:-${DEVICE_INFO[custom]}}"
+    info "🎨 生成自定义 Banner (备用方案)..."
     
     cat > package/base-files/files/etc/banner << EOF
   _______                     ________        __
@@ -117,24 +150,36 @@ generate_banner() {
  %D %V, %C
  -----------------------------------------------------
  
- 🎯 ${dev_name} 定制固件 | BY: ${author}
- 🔗 管理地址：${mgmt_ip} | 用户：root | 密码：首次登录强制修改
+ 🎯 ${DEVICE_NAME} 定制固件 | BY: OpenWrt Auto Build
+ 🔗 管理地址：192.168.1.1 | 用户：root | 密码：首次登录强制修改
+ 📶 WiFi: ${WIFI_PREFIX}XXXX_2G/5G | 密码：${WIFI_PASSWORD}
  
  -----------------------------------------------------
 EOF
-    info "✓ Banner 已生成"
+    info "✓ Banner 已生成 (备用)"
 }
 
 # ============================================================================
-# 📶 步骤 5: 生成智能 WiFi 配置
+# 📶 模块 5: 生成智能 WiFi 配置
 # ============================================================================
 generate_wifi_config() {
     info "📶 生成 WiFi 配置 (前缀: ${WIFI_PREFIX})..."
     
+    # 🔧 优先使用辅助脚本生成器（如果已加载）
+    if [ -f "$SCRIPTS_DIR/wifi-generator.sh" ] && command -v generate_wireless_config &>/dev/null; then
+        info "  🔄 使用 wifi-generator.sh 生成配置..."
+        export DRY_RUN=true  # 开发模式：使用随机 MAC 后缀
+        generate_wireless_config --prefix "$WIFI_PREFIX" --password "$WIFI_PASSWORD" \
+            --output "package/kernel/mac80211/files/lib/wifi/mac80211.sh"
+        chmod +x "package/kernel/mac80211/files/lib/wifi/mac80211.sh"
+        info "✓ WiFi 配置已生成 (辅助脚本)"
+        return 0
+    fi
+    
+    # 📋 降级：使用内联生成逻辑
     local wifi_script="package/kernel/mac80211/files/lib/wifi/mac80211.sh"
     mkdir -p "$(dirname "$wifi_script")"
     
-    # 📋 生成配置脚本（精简版，保留核心逻辑）
     cat > "$wifi_script" << 'WIFI_EOF'
 #!/bin/sh
 append DRIVERS "mac80211"
@@ -154,17 +199,14 @@ detect_mac80211() {
         [ -e "$_dev" ] || continue
         dev="${_dev##*/}"
         
-        # 📋 获取频段和 MAC
         local mac=$(cat /sys/class/ieee80211/${dev}/macaddress 2>/dev/null | tr -d ':')
         local mac_suffix="${mac: -4}"
         [ -z "$mac_suffix" ] && mac_suffix="0000"
         
-        # 📡 生成 SSID
         local band="2G"
         iwinfo nl80211 info "$dev" 2>/dev/null | grep -q "5GHz" && band="5G"
         local ssid="${WIFI_PREFIX}${mac_suffix}_${band}"
         
-        # 📋 生成配置
         uci -q batch << EOF
 set wireless.radio${devidx}=wifi-device
 set wireless.radio${devidx}.type=mac80211
@@ -190,7 +232,6 @@ EOF
 [ "$1" = "detect" ] && detect_mac80211
 WIFI_EOF
 
-    # 🔧 替换变量
     sed -i "s|__WIFI_PREFIX__|${WIFI_PREFIX}|g" "$wifi_script"
     sed -i "s|__WIFI_KEY__|${WIFI_PASSWORD}|g" "$wifi_script"
     chmod +x "$wifi_script"
@@ -199,40 +240,46 @@ WIFI_EOF
 }
 
 # ============================================================================
-# 🔤 步骤 6: 应用插件汉化（可选）
+# 🔤 模块 6: 应用插件汉化（可选，使用辅助脚本）
 # ============================================================================
 apply_translate() {
     [ "$ENABLE_TRANSLATE" != "true" ] && { info "⏭️  跳过汉化"; return 0; }
     
     info "🔤 应用插件名称汉化..."
     
-    # 📋 汉化映射表（精简核心项）
+    # 🔧 优先使用辅助脚本的 translate_file 函数
+    if declare -f translate_file &>/dev/null; then
+        info "  🔄 使用 translate-map.sh 进行汉化..."
+        local count=0
+        find package feeds -type f \( -name "*.lua" -o -name "*.po" -o -name "*zh-cn*" \) 2>/dev/null | while read -r file; do
+            translate_file "$file" 2>/dev/null && ((count++)) || true
+        done
+        info "✓ 汉化完成 (辅助脚本): 处理 $count 个文件"
+        return 0
+    fi
+    
+    # 📋 降级：使用内联映射表
     declare -A TRANSLATE_MAP=(
-        ["进程"]="系统进程" ["软件包"]="插件管理" ["启动项"]="启动管理"
-        ["挂载点"]="挂载设置" ["终端"]="TTYD 终端" ["USB 打印服务器"]="打印服务"
-        ["Turbo ACC 网络加速"]="网络加速" ["实时流量监测"]="实时流量"
-        ["AdGuard Home"]="AdGuard" ["ShadowSocksR Plus+"]="SSR Plus+"
-        ["PassWall"]="科学上网" ["Alist"]="网盘管理" ["FileBrowser"]="文件管理"
-        ["Argon 主题设置"]="主题设置" ["UU 游戏加速器"]="游戏加速"
+        ["AdGuard Home"]="AdGuard" ["Alist"]="网盘管理" ["PassWall"]="科学上网"
+        ["ShadowSocksR Plus+"]="SSR Plus+" ["Turbo ACC 网络加速"]="网络加速"
+        ["软件包"]="插件管理" ["终端"]="TTYD 终端" ["启动项"]="启动管理"
     )
     
     local count=0
     for old_name in "${!TRANSLATE_MAP[@]}"; do
         new_name="${TRANSLATE_MAP[$old_name]}"
-        # 🔍 精准替换（仅 .lua/.po/zh-cn 文件）
-        find package feeds -type f \( -name "*.lua" -o -name "*.po" -o -name "*zh-cn*" \) \
-            -exec grep -l "\"$old_name\"" {} \; 2>/dev/null | while read -r file; do
+        find package feeds -type f \( -name "*.lua" -o -name "*.po" \) -exec grep -l "\"$old_name\"" {} \; 2>/dev/null | while read -r file; do
             sed -i "s|\"$old_name\"|\"$new_name\"|g" "$file"
             ((count++)) || true
         done
         [ $count -gt 0 ] && info "  『$old_name』→ 『$new_name』"
     done
     
-    info "✓ 汉化完成"
+    info "✓ 汉化完成 (内联): 替换 $count 处"
 }
 
 # ============================================================================
-# 🧭 步骤 7: LuCI 菜单自定义调整
+# 🧭 模块 7: LuCI 菜单自定义调整
 # ============================================================================
 adjust_luci_menu() {
     info "🧭 调整 LuCI 菜单位置..."
@@ -251,12 +298,19 @@ adjust_luci_menu() {
 }
 
 # ============================================================================
-# ⚔️ 步骤 8: 包冲突预检 + 自动解决
+# ⚔️ 模块 8: 包冲突预检 + 自动解决（使用辅助脚本）
 # ============================================================================
 resolve_conflicts() {
     info "⚔️ 执行包冲突预检..."
     
-    # 🎯 核心：vsftpd 冲突链切断
+    # 🔧 优先使用辅助脚本的 resolve_conflicts 函数
+    if declare -f resolve_conflicts &>/dev/null && [ -f ".config" ]; then
+        info "  🔄 使用 conflict-resolver.sh 检测冲突..."
+        resolve_conflicts ".config"
+        return 0
+    fi
+    
+    # 📋 降级：使用内联逻辑（核心：vsftpd 冲突链）
     if grep -qE "^CONFIG_PACKAGE_vsftpd-alt=[ym]" .config 2>/dev/null; then
         info "🔧 检测到 vsftpd-alt，禁用冲突包..."
         sed -i 's/^CONFIG_PACKAGE_vsftpd=[ym]/# CONFIG_PACKAGE_vsftpd is not set/' .config
@@ -265,44 +319,36 @@ resolve_conflicts() {
         info "✓ vsftpd 冲突已解决"
     fi
     
-    # 📦 常见冲突对处理
-    declare -A conflicts=(
-        ["dnsmasq"]="dnsmasq-full"
-        ["iptables"]="iptables-nft"
-        ["libustream-mbedtls"]="libustream-openssl"
-    )
-    
-    for pkg in "${!conflicts[@]}"; do
-        alt="${conflicts[$pkg]}"
-        if grep -qE "^CONFIG_PACKAGE_${pkg}=[ym]" .config 2>/dev/null && \
-           grep -qE "^CONFIG_PACKAGE_${alt}=[ym]" .config 2>/dev/null; then
-            warn "⚠️  冲突: $pkg ↔ $alt，禁用 $pkg"
-            sed -i "s/^CONFIG_PACKAGE_${pkg}=[ym]/# CONFIG_PACKAGE_${pkg} is not set/" .config
-        fi
-    done
-    
     # 🔄 重载配置
     make defconfig >/dev/null 2>&1
-    info "✓ 冲突预检完成"
+    info "✓ 冲突预检完成 (内联)"
 }
 
 # ============================================================================
 # 🚀 主执行流程
 # ============================================================================
 main() {
-    echo "🔧 开始执行自定义配置 (设备: $DEVICE)"
+    echo "🔧 开始执行自定义配置 (设备: $DEVICE | 配置: $CONFIG_VERSION)"
+    echo "📁 工作目录: $OPENWRT_PATH"
+    echo ""
     
-    configure_feeds          # 1. 插件源配置
-    sync_kernel              # 2. 内核同步（可选）
-    apply_base_config        # 3. 基础配置
-    generate_banner          # 4. Banner 定制
-    generate_wifi_config     # 5. WiFi 配置
-    apply_translate          # 6. 汉化（可选）
-    adjust_luci_menu         # 7. 菜单调整
-    # ⚠️  注意：冲突预检需在 .config 生成后执行，放在编译前步骤
+    # 🔴 方案 B 核心：先加载辅助脚本
+    load_helper_scripts
     
+    # 📋 原有流程（保持不变）
+    configure_feeds              # 1. 插件源配置
+    sync_kernel                  # 2. 内核同步（可选）
+    apply_base_config            # 3. 基础配置
+    generate_banner_fallback     # 4. Banner (备用，YML 已预处理)
+    generate_wifi_config         # 5. WiFi 配置
+    apply_translate              # 6. 汉化（使用辅助脚本或内联）
+    adjust_luci_menu             # 7. 菜单调整
+    resolve_conflicts            # 8. 冲突预检（使用辅助脚本或内联）
+    
+    echo ""
     echo "✅ 自定义配置完成"
+    echo "📋 下一步: make defconfig → make download → make compile"
 }
 
-# 🎯 执行
+# 🎯 执行主函数
 main "$@"
