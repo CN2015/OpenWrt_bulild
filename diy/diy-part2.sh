@@ -12,7 +12,7 @@ sed -i 's/CONFIG_PACKAGE_luci-theme-bootstrap=y/# CONFIG_PACKAGE_luci-theme-boot
 sed -i 's/# CONFIG_PACKAGE_luci-theme-argon is not set/CONFIG_PACKAGE_luci-theme-argon=y/g' .config
 
 # 2️⃣ 设置默认主机名（避免多台路由器名称冲突）
-sed -i 's/OpenWrt/AX6000-Router/g' package/base-files/files/bin/config_generate
+sed -i 's/LEDE/OpenWrt/g' package/base-files/files/bin/config_generate
 
 # 3️⃣ 替换默认下载源为国内镜像（加速首次登录插件安装）
 [ -f "package/lean/default-settings/files/zzz-default-settings" ] && \
