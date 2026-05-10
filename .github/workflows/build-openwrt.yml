@@ -1,13 +1,3 @@
-这是为您修复后的 **GitHub Actions 完整工作流代码**。
-
-**核心修复逻辑**：
-1.  **强制清理冲突项**：在 `Apply & Verify Configuration` 步骤中，使用 `sed` 命令强制将 `luci-app-vsftpd`、`vsftpd` 及其汉化包替换为 `not set`。这能防止 `make defconfig` 因依赖关系自动拉回这些包。
-2.  **保留增强版核心**：确保 `vsftpd-alt` 保持启用状态。
-3.  **清理旧版防火墙（可选但推荐）**：LEDE 源码现已全面转向 `firewall4`，配置中残留的 `firewall=y` (旧版) 也是导致 `Error 255` 的常见原因，代码中已加入自动清理逻辑。
-
-### 📜 完整 GitHub Actions 代码 (`build.yml`)
-
-```yaml
 name: Build OpenWrt
 
 on:
@@ -214,11 +204,3 @@ jobs:
           - **默认 IP**: 192.168.1.1
           - **默认密码**: 空 (首次登录需设置)
           - **WiFi 密码**: ${{ env.WIFI_PASSWORD }}
-```
-
-### 💡 为什么这次一定能成？
-1.  **`sed -i 's/^CONFIG_PACKAGE_vsftpd=y/...'`**：这行代码直接修改了 `.config` 文件，将启用的 `vsftpd` 强制改为注释状态。即使配置文件里写了 `=y`，脚本执行时也会被覆盖。
-2.  **`make defconfig` 后执行**：脚本先修改配置，再运行 `make defconfig` 重新计算依赖。这样依赖解析器看到的是“已禁用”的状态，就不会再尝试拉回冲突包。
-3.  **双重保险**：同时处理了 `firewall` (旧版) 的禁用，这是 LEDE 源码编译失败的另一个常见原因。
-
-直接复制上述 YAML 代码覆盖您原来的 `build.yml` 内容，提交后重新触发编译即可。祝您一次成功！🎉
