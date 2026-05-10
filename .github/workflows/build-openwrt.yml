@@ -1,8 +1,8 @@
 # ============================================================================
-# OpenWrt LEDE 自动化编译系统 v3.8.16-GA (路径修复版)
+# OpenWrt LEDE 自动化编译系统 v3.8.16-GA (冲突拦截 + 完整修复版)
 # 功能：系统检测 + 依赖安装 + 源码管理 + 智能配置 + 冲突预检 + 汉化 + 编译重试
 # 适配：TP-LINK XDR6088 / REDMI AX6000 / 自定义机型
-# 核心修复：恢复 LEDE 标准依赖初始化 / 全面使用绝对路径 / 优化变量传递 / 增加强制目标校验
+# 核心修复：✅ vsftpd 冲突强制拦截 ✅ 缓存深度清理 ✅ 依赖重载 ✅ 编译失败自动重试
 # ============================================================================
 
 name: Builder OpenWrt Multi-Device
@@ -85,7 +85,7 @@ jobs:
         echo "📋 编译参数: 机型=${{ env.DEVICE }} 配置=${{ env.CONFIG_VERSION }}"
         df -h
 
-    # 🛠️ 步骤 1: 初始化编译环境（🔙 恢复 LEDE 标准依赖脚本）
+    # 🛠️ 步骤 1: 初始化编译环境
     - name: 🛠️ 初始化编译环境
       env:
         DEBIAN_FRONTEND: noninteractive
@@ -298,6 +298,79 @@ jobs:
           echo "⚠️  警告：脚本执行后未生成 .config 文件"
         fi
 
+    # 🔧 步骤 6.5: 强制解决包冲突 + 清理缓存 (Error 255 拦截)
+    - name: 🔧 强制解决包冲突 + 清理缓存
+      run: |
+        cd ${{ env.WORK_DIR }}
+        
+        echo "=========================================="
+        echo "🔧 执行包冲突预检与缓存清理"
+        echo "=========================================="
+        
+        # 📦 1. vsftpd 冲突拦截（高频报错源）
+        if grep -qE "^CONFIG_PACKAGE_vsftpd-alt=[ym]" .config; then
+          echo "🔧 检测到 vsftpd-alt，正在禁用冲突包..."
+          sed -i 's/^CONFIG_PACKAGE_vsftpd=[ym]/# CONFIG_PACKAGE_vsftpd is not set/' .config
+          sed -i 's/^CONFIG_PACKAGE_luci-app-vsftpd=[ym]/# CONFIG_PACKAGE_luci-app-vsftpd is not set/' .config
+          sed -i 's/^CONFIG_PACKAGE_luci-i18n-vsftpd-zh-cn=[ym]/# CONFIG_PACKAGE_luci-i18n-vsftpd-zh-cn is not set/' .config
+          echo "✅ 已切断 vsftpd 冲突依赖链"
+        fi
+        
+        # 📦 2. 其他常见冲突对拦截
+        echo "🔍 扫描其他潜在冲突..."
+        
+        # dnsmasq 基础版 vs 完整版
+        if grep -qE "^CONFIG_PACKAGE_dnsmasq-full=[ym]" .config && grep -qE "^CONFIG_PACKAGE_dnsmasq=[ym]" .config; then
+          echo "⚠️  发现 dnsmasq 冲突，禁用基础版..."
+          sed -i 's/^CONFIG_PACKAGE_dnsmasq=[ym]/# CONFIG_PACKAGE_dnsmasq is not set/' .config
+        fi
+        
+        # firewall3 vs firewall4
+        if grep -qE "^CONFIG_PACKAGE_firewall4=[ym]" .config && grep -qE "^CONFIG_PACKAGE_firewall=[ym]" .config; then
+          echo "⚠️  发现 firewall 冲突，禁用旧版..."
+          sed -i 's/^CONFIG_PACKAGE_firewall=[ym]/# CONFIG_PACKAGE_firewall is not set/' .config
+        fi
+        
+        # libustream SSL 后端冲突
+        SSL_BACKENDS=$(grep -E "^CONFIG_PACKAGE_libustream-(mbedtls|openssl|wolfssl)=[ym]" .config | wc -l)
+        if [ "$SSL_BACKENDS" -gt 1 ]; then
+          echo "⚠️  发现 libustream 多后端冲突，保留 openssl..."
+          sed -i 's/^CONFIG_PACKAGE_libustream-mbedtls=[ym]/# CONFIG_PACKAGE_libustream-mbedtls is not set/' .config
+          sed -i 's/^CONFIG_PACKAGE_libustream-wolfssl=[ym]/# CONFIG_PACKAGE_libustream-wolfssl is not set/' .config
+        fi
+        
+        # 🧹 3. 深度清理 opkg 打包缓存（关键！）
+        echo "🧹 清理 opkg 打包缓存与临时索引..."
+        
+        # 获取目标架构（使用绝对路径安全读取）
+        ARCH=$(grep '^CONFIG_TARGET_ARCH_PACKAGES' .config | cut -d'"' -f2)
+        if [ -n "$ARCH" ]; then
+          rm -rf "${{ env.WORK_DIR }}/staging_dir/target-${ARCH}/root-"* 2>/dev/null || true
+          echo "✅ 已清理: staging_dir/target-${ARCH}/root-*"
+        else
+          rm -rf "${{ env.WORK_DIR }}/staging_dir/target-*/root-"* 2>/dev/null || true
+          echo "✅ 已清理: staging_dir/target-*/root-* (通配符)"
+        fi
+        
+        # 清理临时依赖索引
+        rm -rf "${{ env.WORK_DIR }}/tmp/.packageinfo" "${{ env.WORK_DIR }}/tmp/.targetinfo" "${{ env.WORK_DIR }}/tmp/.packageinfo-"* 2>/dev/null || true
+        echo "✅ 已清理: tmp/.packageinfo*"
+        
+        # 🔄 4. 重载依赖树
+        echo "🔄 重载依赖树 (make defconfig)..."
+        make defconfig >/dev/null 2>&1
+        
+        # 📊 5. 验证修复结果
+        echo ""
+        echo "📋 修复后配置摘要:"
+        echo "   • 已选插件: $(grep -c '^CONFIG_PACKAGE_.*=y' .config) 个"
+        echo "   • vsftpd-alt: $(grep -c '^CONFIG_PACKAGE_vsftpd-alt=y' .config || echo 0) 个"
+        echo "   • dnsmasq-full: $(grep -c '^CONFIG_PACKAGE_dnsmasq-full=y' .config || echo 0) 个"
+        
+        echo ""
+        echo "✅ 冲突预检与缓存清理完成！"
+        echo "=========================================="
+
     # 📥 步骤 7: 下载软件包
     - name: 📥 下载软件包
       run: |
@@ -310,7 +383,7 @@ jobs:
         }
         find dl -size -1024c -exec rm -f {} \; 2>/dev/null || true
 
-    # 🏗️ 步骤 8: 编译固件（📊 增强日志版）
+    # 🏗️ 步骤 8: 编译固件（📊 增强日志版 + 自动重试）
     - name: 🏗️ 编译固件
       id: compile
       run: |
@@ -384,6 +457,10 @@ jobs:
               echo "📦 冲突包: $CONFLICT_PKG"
               sed -i "s/^CONFIG_PACKAGE_${CONFLICT_PKG}=[ym]/# CONFIG_PACKAGE_${CONFLICT_PKG} is not set/" .config
               sed -i "s/^CONFIG_PACKAGE_luci-app-${CONFLICT_PKG}=[ym]/# CONFIG_PACKAGE_luci-app-${CONFLICT_PKG} is not set/" .config 2>/dev/null || true
+              
+              # 深度清理缓存
+              ARCH=$(grep '^CONFIG_TARGET_ARCH_PACKAGES' .config | cut -d'"' -f2)
+              rm -rf staging_dir/target-${ARCH}/root-* tmp/.packageinfo tmp/.targetinfo 2>/dev/null || true
               
               make defconfig >/dev/null 2>&1
               echo "🔄 重试打包阶段..."
