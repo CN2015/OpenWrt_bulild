@@ -1,3 +1,8 @@
+# ============================================================================
+# OpenWrt LEDE 自动化编译系统 v3.8.17 (精简修复版)
+# 核心修复：✅ 简化流程 ✅ 精准路径 ✅ 彻底解决 vsftpd 冲突
+# ============================================================================
+
 name: Build OpenWrt
 
 on:
@@ -6,31 +11,22 @@ on:
       device:
         description: '🎯 选择编译机型'
         required: true
-        default: 'xdr6088'
+        default: 'ax6000'
         type: choice
-        options: [xdr6088, ax6000, custom]
+        options: [xdr6088, ax6000]
       config_version:
         description: '📦 配置版本'
         required: true
         default: 'full'
         type: choice
-        options: [full, mini, custom]
+        options: [full]
 
 env:
-  # 📦 源码配置
   REPO_URL: https://github.com/coolsnowwolf/lede.git
   REPO_BRANCH: master
-  
-  # 🎯 设备配置
-  DEVICE: ${{ github.event.inputs.device || 'xdr6088' }}
-  CONFIG_VERSION: ${{ github.event.inputs.config_version || 'full' }}
-  
-  # 📁 路径配置
+  DEVICE: ${{ github.event.inputs.device }}
+  CONFIG_VERSION: ${{ github.event.inputs.config_version }}
   WORK_DIR: ${{ github.workspace }}/openwrt
-  OUTPUT_DIR: ${{ github.workspace }}/output
-  
-  # 📶 WiFi 配置
-  WIFI_PASSWORD: "1234567890"
 
 jobs:
   build:
@@ -38,169 +34,155 @@ jobs:
     timeout-minutes: 360
     
     steps:
-    # 🔍 步骤 1: 检出仓库代码
-    - name: 🔍 检出仓库代码
+    - name: Checkout Repository
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
-    # 🛠️ 步骤 2: 初始化编译环境
-    - name: 🛠️ 初始化编译环境
+    - name: Initialize Environment
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo -E apt -yqq update
-        sudo -E apt -yqq full-upgrade
-        sudo -E apt -yqq autoremove --purge
-        sudo -E apt -yqq autoclean
-        sudo -E apt -yqq clean
-        sudo -E apt -yqq install dos2unix python3-netifaces libfuse-dev
-        sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
-        sudo -E systemctl daemon-reload
-        sudo -E timedatectl set-timezone "Asia/Shanghai"
+        sudo apt update
+        sudo apt install -y $(curl -s https://build-scripts.immortalwrt.org/init_build_environment.sh | grep "apt install" | sed 's/sudo apt install -y //')
+        sudo apt install -y dos2unix libfuse-dev
         git config --global user.name 'GitHub Actions'
-        git config --global user.email 'noreply@github.com'
-        df -h
+        git config --global user.email 'actions@github.com'
 
-    # 💾 步骤 3: 最大化磁盘空间
-    - name: 💾 合并磁盘空间
+    - name: Maximize Disk Space
       uses: easimon/maximize-build-space@master
       with:
         swap-size-mb: 2048
         temp-reserve-mb: 200
         root-reserve-mb: 2048
 
-    # 📥 步骤 4: 克隆 LEDE 源码
-    - name: 📥 克隆 LEDE 源码
+    - name: Clone LEDE Source
       run: |
         git clone --single-branch ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }} ${{ env.WORK_DIR }}
         cd ${{ env.WORK_DIR }}
-        echo "COMPILE_DATE=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
-        echo "FIRMWARE_TAG=$(date +"%Y%m%d")" >> $GITHUB_ENV
-        echo "OPENWRT_PATH=${{ env.WORK_DIR }}" >> $GITHUB_ENV
+        echo "COMPILE_DATE=$(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
 
-    # ⚙️ 步骤 5: 应用配置并强制修复冲突 (🔥 核心修复步骤)
-    - name: ⚙️ Apply & Verify Configuration
+    - name: Apply Configuration
       run: |
         cd ${{ env.WORK_DIR }}
         
-        # 1. 复制配置文件
-        CONFIG_SRC="${{ github.workspace }}/config/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config"
-        echo "📋 正在应用配置文件: $CONFIG_SRC"
-        if [ ! -f "$CONFIG_SRC" ]; then echo "❌ 找不到配置文件"; exit 1; fi
-        cp -f "$CONFIG_SRC" .config
+        # 检查配置文件是否存在
+        CONFIG_FILE="${{ github.workspace }}/config/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config"
+        echo "📋 配置文件路径: $CONFIG_FILE"
         
-        # 2. 🔥 强制拦截冲突包 (防止 defconfig 自动拉回)
-        echo "🛑 正在强制清理冲突包..."
+        if [ ! -f "$CONFIG_FILE" ]; then
+          echo "❌ 错误：配置文件不存在"
+          echo "📁 当前目录结构:"
+          ls -la "${{ github.workspace }}/"
+          ls -la "${{ github.workspace }}/config/" 2>/dev/null || echo "config 目录不存在"
+          exit 1
+        fi
         
-        # 清理 vsftpd 冲突链
-        sed -i 's/^CONFIG_PACKAGE_luci-app-vsftpd=y/# CONFIG_PACKAGE_luci-app-vsftpd is not set/' .config
+        # 复制配置
+        cp -f "$CONFIG_FILE" .config
+        
+        # 🔧 强制禁用冲突包
+        echo "🔧 修复配置冲突..."
+        
+        # 禁用官方 vsftpd（保留 vsftpd-alt）
         sed -i 's/^CONFIG_PACKAGE_vsftpd=y/# CONFIG_PACKAGE_vsftpd is not set/' .config
+        
+        # 禁用 luci-app-vsftpd（与 vsftpd-alt 不兼容）
+        sed -i 's/^CONFIG_PACKAGE_luci-app-vsftpd=y/# CONFIG_PACKAGE_luci-app-vsftpd is not set/' .config
         sed -i 's/^CONFIG_PACKAGE_luci-i18n-vsftpd-zh-cn=y/# CONFIG_PACKAGE_luci-i18n-vsftpd-zh-cn is not set/' .config
         
-        # 清理旧版防火墙冲突 (LEDE 现已默认 firewall4)
+        # 禁用旧版 firewall（保留 firewall4）
         sed -i 's/^CONFIG_PACKAGE_firewall=y/# CONFIG_PACKAGE_firewall is not set/' .config
-        sed -i 's/^CONFIG_PACKAGE_luci-app-firewall=y/# CONFIG_PACKAGE_luci-app-firewall is not set/' .config
         
-        # 确保增强版 vsftpd-alt 和 firewall4 启用
-        if ! grep -q "^CONFIG_PACKAGE_vsftpd-alt=y" .config; then
+        # 确保 vsftpd-alt 启用
+        if ! grep -q "CONFIG_PACKAGE_vsftpd-alt=y" .config; then
           echo "CONFIG_PACKAGE_vsftpd-alt=y" >> .config
         fi
-        if ! grep -q "^CONFIG_PACKAGE_firewall4=y" .config; then
-          echo "CONFIG_PACKAGE_firewall4=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
-        fi
         
-        echo "✅ 冲突包已强制屏蔽"
+        echo "✅ 配置冲突已修复"
         
-        # 3. 重载依赖树
-        echo "🔄 正在解析配置依赖 (make defconfig)..."
-        make defconfig 2>&1 | tail -5
-        
-        # 4. 校验结果
-        echo ""
-        echo "🔍 校验修复结果:"
-        echo "   vsftpd-alt: $(grep -c '^CONFIG_PACKAGE_vsftpd-alt=y' .config || echo 0) 个"
-        echo "   firewall4:  $(grep -c '^CONFIG_PACKAGE_firewall4=y' .config || echo 0) 个"
-        echo "   vsftpd (旧): $(grep -c '^CONFIG_PACKAGE_vsftpd=y' .config || echo 0) 个 (应为 0)"
-        echo "✅ 配置应用完成。"
+        # 显示配置信息
+        echo "📊 配置信息:"
+        echo "  目标平台: $(grep '^CONFIG_TARGET_BOARD' .config | cut -d'"' -f2)"
+        echo "  设备型号: $(grep '^CONFIG_TARGET_PROFILE' .config | cut -d'"' -f2)"
+        echo "  插件数量: $(grep -c '^CONFIG_PACKAGE_.*=y' .config)"
 
-    # 📥 步骤 6: 下载软件包
-    - name: 📥 下载软件包
+    - name: Update Feeds
       run: |
         cd ${{ env.WORK_DIR }}
-        echo "🔄 执行 make download..."
-        timeout 7200 make download -j8 V=s || {
-          echo "⚠️ 下载超时，清理碎片后重试..."
-          find dl -size -1024c -exec rm -f {} \;
-          make download -j4 V=s
-        }
-        find dl -size -1024c -exec rm -f {} \; 2>/dev/null || true
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
-    # 🏗️ 步骤 7: 编译固件
-    - name: 🏗️ 编译固件
+    - name: Generate Configuration
       run: |
         cd ${{ env.WORK_DIR }}
-        mkdir -p "${{ env.OUTPUT_DIR }}"
-        LOG_FILE="${{ env.OUTPUT_DIR }}/build.log"
+        make defconfig
         
-        echo "🚀 开始编译 (线程: $(nproc))..."
+        # 再次检查并修复 defconfig 可能拉回的冲突包
+        sed -i 's/^CONFIG_PACKAGE_vsftpd=y/# CONFIG_PACKAGE_vsftpd is not set/' .config
+        sed -i 's/^CONFIG_PACKAGE_luci-app-vsftpd=y/# CONFIG_PACKAGE_luci-app-vsftpd is not set/' .config
         
-        # 执行编译
-        make -j$(nproc) V=s 2>&1 | tee -a "$LOG_FILE"
+        make defconfig
+
+    - name: Download Packages
+      run: |
+        cd ${{ env.WORK_DIR }}
+        make download -j$(nproc)
+
+    - name: Compile Firmware
+      id: compile
+      run: |
+        cd ${{ env.WORK_DIR }}
+        mkdir -p ${{ github.workspace }}/output
         
-        # 检查结果
-        if [ ${PIPESTATUS[0]} -eq 0 ]; then
-          echo "✅ 编译成功！"
-          echo "status=success" >> $GITHUB_OUTPUT
+        START_TIME=$(date +%s)
+        
+        # 编译
+        if make -j$(nproc) V=s 2>&1 | tee ${{ github.workspace }}/output/build.log; then
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
+          
+          echo "✅ 编译成功！耗时: $((DURATION/3600))h $((DURATION%3600/60))m $((DURATION%60))s"
+          
+          # 查找固件
+          FIRMWARE=$(find bin/targets -name "*sysupgrade.bin" -type f | head -1)
+          if [ -n "$FIRMWARE" ]; then
+            echo "📦 固件文件: $FIRMWARE"
+            cp "$FIRMWARE" ${{ github.workspace }}/output/
+            echo "FIRMWARE_NAME=$(basename $FIRMWARE)" >> $GITHUB_ENV
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "❌ 未找到固件文件"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
         else
           echo "❌ 编译失败"
           echo "status=failed" >> $GITHUB_OUTPUT
           exit 1
         fi
 
-    # 📦 步骤 8: 整理固件并上传
-    - name: 📦 整理固件
-      if: success()
-      run: |
-        cd ${{ env.WORK_DIR }}
-        mkdir -p ${{ env.OUTPUT_DIR }}
-        
-        echo "🔍 查找固件文件..."
-        FIRMWARE_PATH=$(find bin/targets -name "*sysupgrade.bin" -type f 2>/dev/null | head -1)
-        
-        if [ -z "$FIRMWARE_PATH" ]; then
-          echo "❌ 未找到固件文件"
-          ls -la bin/targets/ 2>/dev/null || true
-          exit 1
-        fi
-        
-        # 重命名
-        NEW_NAME="OpenWrt-${{ env.DEVICE }}-${{ env.FIRMWARE_TAG }}.bin"
-        cp "$FIRMWARE_PATH" "${{ env.OUTPUT_DIR }}/$NEW_NAME"
-        
-        echo "FIRMWARE_NAME=$NEW_NAME" >> $GITHUB_ENV
-        echo "FIRMWARE_PATH=${{ env.OUTPUT_DIR }}" >> $GITHUB_ENV
-        
-        # 生成校验和
-        sha256sum "${{ env.OUTPUT_DIR }}"/*.bin > "${{ env.OUTPUT_DIR }}/sha256sums.txt"
-        echo "✅ 固件整理完成: $NEW_NAME"
-
-    # 🚀 步骤 9: 发布 Release
-    - name: 🚀 发布 Release
+    - name: Upload Firmware
+      if: steps.compile.outputs.status == 'success'
       uses: ncipollo/release-action@v1
       with:
-        name: OpenWrt-${{ env.DEVICE }}-${{ env.FIRMWARE_TAG }}
-        tag: OpenWrt-${{ env.DEVICE }}-${{ env.FIRMWARE_TAG }}
+        name: OpenWrt-${{ env.DEVICE }}-${{ env.FIRMWARE_TAG || github.run_number }}
+        tag: OpenWrt-${{ env.DEVICE }}-${{ env.FIRMWARE_TAG || github.run_number }}
         token: ${{ secrets.GITHUB_TOKEN }}
         artifacts: |
-          ${{ env.OUTPUT_DIR }}/*.bin
-          ${{ env.OUTPUT_DIR }}/sha256sums.txt
+          ${{ github.workspace }}/output/*.bin
+          ${{ github.workspace }}/output/build.log
         body: |
-          ### 📒 固件信息
+          ### 📒 编译信息
           - **设备**: ${{ env.DEVICE }}
-          - **源码**: LEDE (master)
           - **编译时间**: ${{ env.COMPILE_DATE }}
-          - **默认 IP**: 192.168.1.1
-          - **默认密码**: 空 (首次登录需设置)
-          - **WiFi 密码**: ${{ env.WIFI_PASSWORD }}
+          - **固件**: ${{ env.FIRMWARE_NAME }}
+
+    - name: Upload Logs (on failure)
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-${{ env.DEVICE }}
+        path: |
+          ${{ github.workspace }}/output/build.log
+          ${{ env.WORK_DIR }}/.config
