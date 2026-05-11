@@ -3,6 +3,7 @@
 # 功能：系统检测 + 依赖安装 + 源码管理 + 智能配置 + 冲突预检 + 汉化 + 编译重试
 # 适配：TP-LINK XDR6088 / REDMI AX6000 / 自定义机型
 # 核心修复：✅ vsftpd 冲突强制拦截 ✅ 缓存深度清理 ✅ 依赖重载 ✅ 编译失败自动重试
+#          ✅ Release 标签冲突自动覆盖 (allowUpdates: true)
 # ============================================================================
 
 name: Builder OpenWrt Multi-Device
@@ -84,6 +85,7 @@ jobs:
         echo "• 磁盘: $(df -h / | tail -1 | awk '{print $2" (可用 "$4")"}')"
         echo "📋 编译参数: 机型=${{ env.DEVICE }} 配置=${{ env.CONFIG_VERSION }}"
         df -h
+
     # 🛠️ 步骤 1: 初始化编译环境
     - name: 🛠️ 初始化编译环境
       env:
@@ -113,6 +115,7 @@ jobs:
         
         # 💾 显示磁盘空间
         df -h
+
     # 💾 步骤 2: 最大化磁盘空间
     - name: 💾 合并磁盘空间
       uses: easimon/maximize-build-space@master
@@ -143,6 +146,7 @@ jobs:
           echo "DEVICE_TARGET=$(grep '^CONFIG_TARGET_BOARD' "$CONFIG_PATH" | cut -d'"' -f2)" >> $GITHUB_ENV
           echo "DEVICE_SUBTARGET=$(grep '^CONFIG_TARGET_SUBTARGET' "$CONFIG_PATH" | cut -d'"' -f2)" >> $GITHUB_ENV
         fi
+
     # 💾 步骤 5: 缓存工具链
     - name: 💾 缓存工具链
       if: env.CACHE_TOOLCHAIN == 'true'
@@ -190,6 +194,7 @@ jobs:
         fi
         
         echo "✅ 配置应用与校验完成。"
+
     # 📁 步骤 5.5: 复制预配置文件到源码
     - name: 📁 复制预配置文件到源码
       run: |
@@ -243,6 +248,7 @@ jobs:
         else
           log_warn "diy/files 目录不存在，跳过预配置"
         fi
+
     # 🔧 步骤 6: 执行自定义配置脚本
     - name: 🔧 执行自定义配置脚本
       run: |
@@ -292,6 +298,7 @@ jobs:
         else
           echo "⚠️  警告：脚本执行后未生成 .config 文件"
         fi
+
     # 🔧 步骤 6.5: 强制解决包冲突 + 清理缓存 (Error 255 拦截)
     - name: 🔧 强制解决包冲突 + 清理缓存
       run: |
@@ -364,6 +371,7 @@ jobs:
         echo ""
         echo "✅ 冲突预检与缓存清理完成！"
         echo "=========================================="
+
     # 📥 步骤 7: 下载软件包
     - name: 📥 下载软件包
       run: |
@@ -375,6 +383,7 @@ jobs:
           make download -j4 V=s
         }
         find dl -size -1024c -exec rm -f {} \; 2>/dev/null || true
+
     # 🏗️ 步骤 8: 编译固件（📊 增强日志版 + 自动重试）
     - name: 🏗️ 编译固件
       id: compile
@@ -524,6 +533,7 @@ jobs:
           echo "  4. 查看错误日志：$LOG_FILE"
           exit 1
         fi
+
     # 🗂️ 步骤 9: 整理固件文件（🔍 增强调试版）
     - name: 🗂️ 整理固件文件
       if: steps.compile.outputs.status == 'success'
@@ -615,6 +625,7 @@ jobs:
         ls -lh ${{ env.OUTPUT_DIR }}/
         echo ""
         echo "🎉 下一步将自动发布到 Release"
+
     # 📤 步骤 10: 上传 Artifact
     - name: 📤 上传固件到 Artifact
       if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE != 'true'
@@ -624,7 +635,7 @@ jobs:
         path: ${{ env.OUTPUT_DIR }}/*
         retention-days: 7
 
-    # 🚀 步骤 11: 发布 Release
+    # 🚀 步骤 11: 发布 Release（✅ 修复：允许覆盖同名标签）
     - name: 🚀 发布固件到 Release
       if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE == 'true'
       uses: ncipollo/release-action@v1
@@ -632,6 +643,8 @@ jobs:
         name: OpenWrt-${{ env.DEVICE }}-${{ env.FIRMWARE_TAG }}
         tag: OpenWrt-${{ env.DEVICE }}-${{ env.FIRMWARE_TAG }}
         token: ${{ secrets.GITHUB_TOKEN }}
+        allowUpdates: true              # ✅ 关键：允许覆盖已存在的 Release
+        replacesArtifacts: true         # ✅ 可选：自动替换旧固件文件
         artifacts: |
           ${{ env.OUTPUT_DIR }}/*.bin
           ${{ env.OUTPUT_DIR }}/sha256sums.txt
@@ -651,12 +664,14 @@ jobs:
           - 🌐 管理地址: `192.168.1.1`
           - 👤 用户名: `root`
           - 🔒 密码: **首次登录强制修改**
-          - 📶 WiFi: 前缀`${{ env.DEVICE == 'xdr6088' && 'TP-LINK_' || 'OpenWrt_' }}` + MAC_2G/5G
+          - 📶 WiFi: 前缀`${{ env.DEVICE == 'xdr6088' && 'TP-LINK_' || (env.DEVICE == 'ax6000' && 'Redmi_' || 'OpenWrt_') }}` + MAC_2G/5G
           
           ### ⚠️ 注意事项
           1. 首次刷写建议: `sysupgrade -n firmware.bin`
           2. 固件校验: `sha256sum -c sha256sums.txt`
           3. 配置文件备份: `build.config`
+          4. WiFi 名称格式: `前缀+MAC后4位+频段`（例: `TP-LINK_1234_5G`）
+
     # 📝 步骤 12: 上传日志
     - name: 📝 上传编译日志
       if: always()
