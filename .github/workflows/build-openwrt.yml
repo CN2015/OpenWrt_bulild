@@ -1,7 +1,3 @@
-# ============================================================================
-# OpenWrt 自动化编译系统 - GitHub Actions
-# ============================================================================
-
 name: Build OpenWrt
 
 on:
@@ -16,7 +12,7 @@ on:
       config_version:
         description: '📦 配置版本'
         required: true
-        default: 'full'
+        default: 'test'
         type: choice
         options: [full, mini, test]
 
@@ -92,19 +88,23 @@ jobs:
         
         # 显示当前目录结构
         echo "📁 当前目录结构:"
-        ls -la ../
+        ls -la
         
-        # 复制配置文件
-        CONFIG_FILE="../config/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config"
+        # ✅ 修复：使用 GITHUB_WORKSPACE 环境变量访问仓库根目录
+        CONFIG_FILE="${{ github.workspace }}/config/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config"
         echo "📋 应用配置: $CONFIG_FILE"
         
+        # 检查文件是否存在
         if [ ! -f "$CONFIG_FILE" ]; then
-          echo "❌ 错误：找不到配置文件"
-          echo "📁 可用配置文件:"
-          ls -la ../config/ || echo "config 目录不存在"
+          echo "❌ 错误：找不到配置文件 $CONFIG_FILE"
+          echo "📁 仓库根目录结构:"
+          ls -la "${{ github.workspace }}/"
+          echo "📁 config 目录内容:"
+          ls -la "${{ github.workspace }}/config/" 2>/dev/null || echo "config 目录不存在"
           exit 1
         fi
         
+        # 复制配置文件
         cp -f "$CONFIG_FILE" .config
         
         # 🔧 强制修复冲突包
