@@ -12,7 +12,7 @@ on:
       config_version:
         description: '📦 配置版本'
         required: true
-        default: 'test'
+        default: 'full'
         type: choice
         options: [full, mini, test]
 
@@ -86,35 +86,51 @@ jobs:
       run: |
         cd openwrt
         
-        # 显示当前目录结构
-        echo "📁 当前目录结构:"
-        ls -la
+        # 🔍 调试：显示当前目录和仓库结构
+        echo "📁 当前工作目录: $(pwd)"
+        echo "📁 GitHub 工作区: ${{ github.workspace }}"
+        echo ""
+        echo "📋 仓库根目录内容:"
+        ls -la "${{ github.workspace }}/"
+        echo ""
         
-        # ✅ 修复：使用 GITHUB_WORKSPACE 环境变量访问仓库根目录
-        CONFIG_FILE="${{ github.workspace }}/config/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config"
-        echo "📋 应用配置: $CONFIG_FILE"
+        # ✅ 使用绝对路径访问配置文件
+        CONFIG_DIR="${{ github.workspace }}/config"
+        CONFIG_FILE="${CONFIG_DIR}/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config"
         
-        # 检查文件是否存在
-        if [ ! -f "$CONFIG_FILE" ]; then
-          echo "❌ 错误：找不到配置文件 $CONFIG_FILE"
-          echo "📁 仓库根目录结构:"
+        echo "📋 配置文件路径: $CONFIG_FILE"
+        echo ""
+        
+        # 检查 config 目录是否存在
+        if [ ! -d "$CONFIG_DIR" ]; then
+          echo "❌ 错误：config 目录不存在！"
+          echo "📁 可用目录:"
           ls -la "${{ github.workspace }}/"
-          echo "📁 config 目录内容:"
-          ls -la "${{ github.workspace }}/config/" 2>/dev/null || echo "config 目录不存在"
           exit 1
         fi
         
-        # 复制配置文件
+        # 检查配置文件是否存在
+        if [ ! -f "$CONFIG_FILE" ]; then
+          echo "❌ 错误：配置文件不存在！"
+          echo "📁 config 目录内容:"
+          ls -la "$CONFIG_DIR/"
+          echo ""
+          echo "🔍 查找所有 .config 文件:"
+          find "${{ github.workspace }}" -name "*.config" -type f
+          exit 1
+        fi
+        
+        echo "✅ 找到配置文件，开始复制..."
         cp -f "$CONFIG_FILE" .config
         
-        # 🔧 强制修复冲突包
+        # 🔧 修复冲突包
         echo "🔧 修复配置冲突..."
         sed -i 's/^CONFIG_PACKAGE_vsftpd=y/# CONFIG_PACKAGE_vsftpd is not set/' .config
         sed -i 's/^CONFIG_PACKAGE_luci-app-vsftpd=y/# CONFIG_PACKAGE_luci-app-vsftpd is not set/' .config
         sed -i 's/^CONFIG_PACKAGE_luci-i18n-vsftpd-zh-cn=y/# CONFIG_PACKAGE_luci-i18n-vsftpd-zh-cn is not set/' .config
         sed -i 's/^CONFIG_PACKAGE_firewall=y/# CONFIG_PACKAGE_firewall is not set/' .config
         
-        # 确保 vsftpd-alt 和 firewall4 启用
+        # 确保必要包启用
         if ! grep -q "CONFIG_PACKAGE_vsftpd-alt=y" .config; then
           echo "CONFIG_PACKAGE_vsftpd-alt=y" >> .config
         fi
@@ -144,13 +160,11 @@ jobs:
         
         START_TIME=$(date +%s)
         
-        # 编译
         if make -j$(nproc) V=s 2>&1 | tee ../output/build.log; then
           END_TIME=$(date +%s)
           DURATION=$((END_TIME - START_TIME))
           echo "✅ 编译成功！耗时: $((DURATION/3600))h $((DURATION%3600/60))m $((DURATION%60))s"
           
-          # 查找固件
           FIRMWARE=$(find bin/targets -name "*sysupgrade.bin" -type f | head -1)
           if [ -n "$FIRMWARE" ]; then
             cp "$FIRMWARE" ../output/
