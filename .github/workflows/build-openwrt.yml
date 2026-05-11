@@ -1,7 +1,5 @@
 # ============================================================================
 # OpenWrt 自动化编译系统 - GitHub Actions
-# 功能：自动编译 + 智能配置 + 冲突拦截 + 固件发布
-# 适配：REDMI AX6000 / TP-LINK XDR6088
 # ============================================================================
 
 name: Build OpenWrt
@@ -45,9 +43,40 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo apt update
-        sudo apt install -y $(curl -s https://build-scripts.immortalwrt.org/init_build_environment.sh | grep "apt install" | sed 's/sudo apt install -y //')
-        sudo apt install -y dos2unix libfuse-dev
+        # 更新包管理器
+        sudo apt-get update
+        
+        # 安装 LEDE 标准编译依赖
+        sudo apt-get install -y \
+          build-essential \
+          clang \
+          flex \
+          bison \
+          g++ \
+          gawk \
+          gcc-multilib \
+          g++-multilib \
+          gettext \
+          git \
+          libncurses5-dev \
+          libssl-dev \
+          python3 \
+          python3-setuptools \
+          rsync \
+          swig \
+          unzip \
+          zlib1g-dev \
+          file \
+          wget \
+          make \
+          ccache \
+          libz-dev \
+          libstdc++6 \
+          xsltproc \
+          dos2unix \
+          libfuse-dev
+        
+        # 配置 Git
         git config --global user.name 'GitHub Actions'
         git config --global user.email 'actions@github.com'
 
@@ -74,7 +103,8 @@ jobs:
         
         if [ ! -f "$CONFIG_FILE" ]; then
           echo "❌ 错误：找不到配置文件"
-          ls -la "${{ github.workspace }}/config/" || echo "目录不存在"
+          echo "📁 可用配置文件:"
+          ls -la "${{ github.workspace }}/config/" || echo "config 目录不存在"
           exit 1
         fi
         
@@ -94,23 +124,6 @@ jobs:
         if ! grep -q "CONFIG_PACKAGE_firewall4=y" .config; then
           echo "CONFIG_PACKAGE_firewall4=y" >> .config
         fi
-        
-        # 设置 WiFi 前缀（根据机型）
-        case "${{ env.DEVICE }}" in
-          ax6000)
-            WIFI_PREFIX="Redmi_"
-            echo "📱 Redmi AX6000 - WiFi 前缀: Redmi_"
-            ;;
-          xdr6088)
-            WIFI_PREFIX="TP-LINK_"
-            echo "📱 TP-LINK XDR6088 - WiFi 前缀: TP-LINK_"
-            ;;
-          *)
-            WIFI_PREFIX="OpenWrt_"
-            echo "📱 未知机型 - WiFi 前缀: OpenWrt_"
-            ;;
-        esac
-        echo "WIFI_PREFIX=$WIFI_PREFIX" >> $GITHUB_ENV
         
         # 更新 feeds
         ./scripts/feeds update -a
@@ -173,6 +186,7 @@ jobs:
           | 项目 | 值 |
           |------|-----|
           | 💻 设备 | ${{ env.DEVICE }} |
+          | 📦 配置 | ${{ env.CONFIG_VERSION }} |
           | 📂 源码 | coolsnowwolf/lede |
           | 🌳 分支 | ${{ env.REPO_BRANCH }} |
           | 🕐 编译时间 | ${{ env.COMPILE_DATE }} |
@@ -181,13 +195,8 @@ jobs:
           - 🌐 管理地址: `192.168.1.1`
           - 👤 用户名: `root`
           - 🔒 密码: **首次登录强制修改**
-          - 📶 WiFi: 前缀 `${{ env.WIFI_PREFIX }}` + MAC_2G/5G
+          - 📶 WiFi: 前缀 `Redmi_` 或 `TP-LINK_` + MAC_2G/5G
           - 🎨 主题: Argon
-          
-          ### ⚠️ 注意事项
-          1. 首次刷写建议: `sysupgrade -n firmware.bin`
-          2. 固件已包含 Argon 主题
-          3. WiFi 名称格式: `${{ env.WIFI_PREFIX }}XXXX_2G/5G`
 
     - name: 📝 上传日志（失败时）
       if: failure()
