@@ -16,7 +16,7 @@ on:
       config_version:
         description: '📦 配置版本'
         required: true
-        default: 'test'
+        default: 'full'
         type: choice
         options: [full, mini, test]
 
@@ -25,8 +25,6 @@ env:
   REPO_BRANCH: master
   DEVICE: ${{ github.event.inputs.device }}
   CONFIG_VERSION: ${{ github.event.inputs.config_version }}
-  WORK_DIR: ${{ github.workspace }}/openwrt
-  OUTPUT_DIR: ${{ github.workspace }}/output
 
 jobs:
   build:
@@ -43,10 +41,7 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        # 更新包管理器
         sudo apt-get update
-        
-        # 安装 LEDE 标准编译依赖
         sudo apt-get install -y \
           build-essential \
           clang \
@@ -76,7 +71,6 @@ jobs:
           dos2unix \
           libfuse-dev
         
-        # 配置 Git
         git config --global user.name 'GitHub Actions'
         git config --global user.email 'actions@github.com'
 
@@ -89,22 +83,25 @@ jobs:
 
     - name: 📥 克隆 LEDE 源码
       run: |
-        git clone --single-branch ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }} ${{ env.WORK_DIR }}
-        cd ${{ env.WORK_DIR }}
+        git clone --single-branch ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }} openwrt
         echo "COMPILE_DATE=$(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
 
     - name: ⚙️ 应用配置并修复冲突
       run: |
-        cd ${{ env.WORK_DIR }}
+        cd openwrt
+        
+        # 显示当前目录结构
+        echo "📁 当前目录结构:"
+        ls -la ../
         
         # 复制配置文件
-        CONFIG_FILE="${{ github.workspace }}/config/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config"
+        CONFIG_FILE="../config/${{ env.DEVICE }}-${{ env.CONFIG_VERSION }}.config"
         echo "📋 应用配置: $CONFIG_FILE"
         
         if [ ! -f "$CONFIG_FILE" ]; then
           echo "❌ 错误：找不到配置文件"
           echo "📁 可用配置文件:"
-          ls -la "${{ github.workspace }}/config/" || echo "config 目录不存在"
+          ls -la ../config/ || echo "config 目录不存在"
           exit 1
         fi
         
@@ -136,19 +133,19 @@ jobs:
 
     - name: 📥 下载软件包
       run: |
-        cd ${{ env.WORK_DIR }}
+        cd openwrt
         make download -j$(nproc)
 
     - name: 🏗️ 编译固件
       id: compile
       run: |
-        cd ${{ env.WORK_DIR }}
-        mkdir -p ${{ env.OUTPUT_DIR }}
+        cd openwrt
+        mkdir -p ../output
         
         START_TIME=$(date +%s)
         
         # 编译
-        if make -j$(nproc) V=s 2>&1 | tee ${{ env.OUTPUT_DIR }}/build.log; then
+        if make -j$(nproc) V=s 2>&1 | tee ../output/build.log; then
           END_TIME=$(date +%s)
           DURATION=$((END_TIME - START_TIME))
           echo "✅ 编译成功！耗时: $((DURATION/3600))h $((DURATION%3600/60))m $((DURATION%60))s"
@@ -156,7 +153,7 @@ jobs:
           # 查找固件
           FIRMWARE=$(find bin/targets -name "*sysupgrade.bin" -type f | head -1)
           if [ -n "$FIRMWARE" ]; then
-            cp "$FIRMWARE" ${{ env.OUTPUT_DIR }}/
+            cp "$FIRMWARE" ../output/
             echo "FIRMWARE_NAME=$(basename $FIRMWARE)" >> $GITHUB_ENV
             echo "status=success" >> $GITHUB_OUTPUT
           else
@@ -178,8 +175,8 @@ jobs:
         tag: OpenWrt-${{ env.DEVICE }}-${{ github.run_number }}
         token: ${{ secrets.GITHUB_TOKEN }}
         artifacts: |
-          ${{ env.OUTPUT_DIR }}/*.bin
-          ${{ env.OUTPUT_DIR }}/build.log
+          output/*.bin
+          output/build.log
         body: |
           ### 📒 固件信息
           
@@ -204,5 +201,5 @@ jobs:
       with:
         name: build-logs-${{ env.DEVICE }}
         path: |
-          ${{ env.OUTPUT_DIR }}/build.log
-          ${{ env.WORK_DIR }}/.config
+          output/build.log
+          openwrt/.config
