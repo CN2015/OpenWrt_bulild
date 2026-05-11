@@ -18,9 +18,9 @@ on:
       config_version:
         description: '📦 配置版本'
         required: true
-        default: 'full'
+        default: 'test'
         type: choice
-        options: [full, mini]
+        options: [full, mini,test]
 
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede.git
